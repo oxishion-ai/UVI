@@ -6,8 +6,3 @@ __pycache__/
 # aucun intérêt à le versionner -- peut peser plusieurs centaines de Mo
 # pour Shion-Micro/Base.
 shion/weights/*/_optimizer_state/
-
-# Checkpoint Shion-Micro : entraînement en cours (local + Colab), on
-# committera le résultat une fois stabilisé plutôt que des instantanés
-# intermédiaires qui changent à chaque sauvegarde périodique.
-shion/weights/shion-micro/
