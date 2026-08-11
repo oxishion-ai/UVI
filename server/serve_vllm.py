@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import types
+import importlib.machinery
 import uvicorn
 
 # --- PATCH : contourner l'absence de uvloop sous Windows ---
@@ -23,11 +24,19 @@ sys.modules['uvloop'] = MockUvloop()
 # import : Python le trouve déjà "importé" et n'exécute jamais le vrai
 # __init__.py de torchaudio (donc jamais la vérification CUDA foireuse).
 # Même principe que le mock uvloop juste au-dessus.
+#
+# __spec__ DOIT être un vrai ModuleSpec, pas None : transformers vérifie
+# aussi la présence de torchaudio via importlib.util.find_spec (pas
+# seulement `import torchaudio`), qui lève explicitement ValueError si le
+# module déjà présent dans sys.modules a un __spec__ à None -- un module
+# créé à la main avec types.ModuleType() n'en a pas par défaut.
 if 'torchaudio' not in sys.modules:
     try:
         import torchaudio  # noqa: F401  -- si ça marche déjà, tant mieux, rien à patcher
     except Exception:
-        sys.modules['torchaudio'] = types.ModuleType('torchaudio')
+        stub = types.ModuleType('torchaudio')
+        stub.__spec__ = importlib.machinery.ModuleSpec('torchaudio', loader=None)
+        sys.modules['torchaudio'] = stub
 
 # --- Importer l'API server de vLLM ---
 from vllm.entrypoints.openai import api_server
