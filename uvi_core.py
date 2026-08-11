@@ -19,6 +19,43 @@ from enum import Enum
 from typing import Any, List, Optional, Dict, Callable, Union
 
 
+def _charger_config_shion_locale() -> None:
+    """Charge .shion.local.env (à côté de ce fichier) dans les variables
+    d'environnement du PROCESSUS, AVANT que SHION_BACKEND et le reste de
+    la config SHION/DeepSeek (plus bas dans ce fichier) ne soient lus --
+    permet de configurer SHION.ASK UNE FOIS pour toutes (ex. après avoir
+    monté un serveur DeepSeek sur Colab) sans avoir à redéfinir des
+    variables d'environnement à chaque lancement.
+
+    Ce fichier n'est JAMAIS versionné (voir .gitignore) : il contient
+    typiquement une URL de tunnel et une clé d'API propres à UNE session
+    de calcul de SON auteur. Partager ce dossier (VS Code, zip, dépôt
+    cloné) ne le partage donc PAS -- quiconque n'a pas ce fichier local
+    retombe simplement sur SHION_BACKEND=shion (le moteur natif embarqué,
+    fonctionne sans aucune configuration, voir _build_shion_client). Pour
+    qui l'a, os.environ.setdefault ne fait JAMAIS taire une variable
+    d'environnement RÉELLEMENT exportée par l'utilisateur : ce fichier ne
+    fournit que des valeurs par défaut, jamais une priorité.
+
+    Absent chez tout le monde tant que personne n'en crée un -- aucun
+    changement de comportement pour qui n'utilise pas cette fonctionnalité."""
+    chemin = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".shion.local.env")
+    try:
+        with open(chemin, "r", encoding="utf-8") as f:
+            lignes = f.readlines()
+    except OSError:
+        return  # fichier absent (cas normal) ou illisible : rien à charger
+    for ligne in lignes:
+        ligne = ligne.strip()
+        if not ligne or ligne.startswith("#") or "=" not in ligne:
+            continue
+        cle, _, valeur = ligne.partition("=")
+        os.environ.setdefault(cle.strip(), valeur.strip())
+
+
+_charger_config_shion_locale()
+
+
 # ==============================================================================
 # FICHIER UNIQUE — modules fusionnés ci-dessous, dans cet ordre :
 #   compiler_v2.py -> uvi_vm.py -> tools.py -> self_correction.py
@@ -4530,6 +4567,19 @@ class DeepSeekClientError(LLMClientError):
     traduit, actionnable, jamais une trace urllib/json brute."""
 
 
+class DeepSeekUnreachableError(DeepSeekClientError):
+    """Sous-cas de DeepSeekClientError signalant spécifiquement que
+    l'ENDPOINT lui-même semble absent (connexion refusée, DNS, timeout de
+    connexion, ou réponse qui n'est même pas du JSON -- typiquement une
+    page d'erreur ngrok pour un tunnel expiré), PAS que le serveur vLLM a
+    répondu par une erreur applicative (400/401/404 JSON, budget de
+    tokens épuisé...). _DeepSeekAvecReplisLocal ne bascule sur le moteur
+    Shion local QUE sur ce sous-cas précis : une vraie erreur applicative
+    (ex. mauvaise clé d'API) doit rester visible telle quelle -- un repli
+    silencieux la masquerait derrière une réponse Shion sans rapport,
+    rendant le vrai problème plus dur à diagnostiquer, pas plus facile."""
+
+
 class ShionClientError(LLMClientError):
     """Erreur remontée par le backend Shion NATIF (paquet externe `shion`,
     voir _ShionNativeAdapter juste avant _build_shion_client). Même
@@ -4707,18 +4757,26 @@ class DeepSeekClient(LLMClient):
         return self._history + [{"role": "user", "content": prompt}]
 
     @staticmethod
-    def _traduire_http(e: "urllib.error.HTTPError", model_name: str,
+    def _traduire_http(code: int, corps_texte: str, model_name: str,
                         max_tokens: int = DEEPSEEK_MAX_TOKENS) -> str:
-        """Transforme une HTTPError vLLM en phrase actionnable en français.
+        """Transforme une réponse d'erreur HTTP vLLM en phrase actionnable
+        en français.
+
+        Prend `code` et `corps_texte` (déjà LUS par l'appelant) plutôt que
+        l'objet HTTPError lui-même : ce dernier est un flux à usage
+        unique, et complete() doit déjà avoir lu son corps une première
+        fois pour décider si la réponse est du JSON exploitable ou une
+        page d'erreur d'un proxy (voir DeepSeekUnreachableError) --
+        relire ici lèverait silencieusement une chaîne vide.
 
         Lit les DEUX formes de corps d'erreur (plate historique, imbriquée
         récente) -- voir la docstring de la classe. `max_tokens` : celui de
         l'INSTANCE appelante (voir __init__), pas la constante de module --
         sinon la piste affichée sur une erreur 400 mentirait dès que le
         panneau PARAMÈTRES a changé le budget de tokens du client actif."""
-        message_serveur = str(e)
+        message_serveur = corps_texte
         try:
-            corps = json.loads(e.read().decode("utf-8"))
+            corps = json.loads(corps_texte)
             if isinstance(corps, dict):
                 # Forme PLATE d'abord (celle que vLLM produit depuis
                 # toujours), puis forme imbriquée façon OpenAI (ajoutée par
@@ -4733,11 +4791,11 @@ class DeepSeekClient(LLMClient):
                     or imbrique.get("message")
                     or message_serveur
                 )
-        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError, ValueError):
+        except (json.JSONDecodeError, ValueError):
             pass
 
         piste = ""
-        if e.code == 404:
+        if code == 404:
             # L'erreur n°1 au premier branchement, et la plus déroutante :
             # le serveur RÉPOND (donc le réseau va bien), mais refuse le nom
             # de modèle. On donne directement la commande de diagnostic.
@@ -4747,20 +4805,20 @@ class DeepSeekClient(LLMClient):
                 "curl %s/v1/models  puis définissez DEEPSEEK_MODEL_NAME en "
                 "conséquence." % (model_name, SHION_SERVER_URL.rstrip("/"))
             )
-        elif e.code == 401:
+        elif code == 401:
             piste = (
                 " -- le serveur vLLM a été lancé avec --api-key et attend un "
                 "jeton. Définissez DEEPSEEK_API_KEY avec la même valeur."
             )
-        elif e.code == 400:
+        elif code == 400:
             piste = (
                 " -- requête refusée (souvent : contexte dépassé). Réduisez la "
                 "longueur du prompt, ou baissez le budget de tokens (actuel : "
                 "%d)." % max_tokens
             )
-        elif e.code >= 500:
+        elif code >= 500:
             piste = " -- erreur interne du serveur vLLM, consultez ses logs."
-        return "SHION/DeepSeek a échoué (HTTP %d) : %s%s" % (e.code, message_serveur, piste)
+        return "SHION/DeepSeek a échoué (HTTP %d) : %s%s" % (code, message_serveur, piste)
 
     # -- contrat LLMClient ------------------------------------------------
 
@@ -4802,7 +4860,30 @@ class DeepSeekClient(LLMClient):
             with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
                 corps = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            raise DeepSeekClientError(self._traduire_http(e, self.model_name, self.max_tokens))
+            corps_texte = e.read().decode("utf-8", "replace")
+            try:
+                json.loads(corps_texte)
+                reponse_est_json = True
+            except (json.JSONDecodeError, ValueError):
+                reponse_est_json = False
+            if not reponse_est_json:
+                # vLLM répond TOUJOURS en JSON, même en erreur (voir
+                # _traduire_http) -- une réponse qui n'en est pas du tout
+                # signale qu'on ne parle probablement pas à notre serveur
+                # mais à un intermédiaire (page d'erreur ngrok pour un
+                # tunnel expiré, proxy, etc.). DeepSeekUnreachableError,
+                # pas une DeepSeekClientError ordinaire : voir sa
+                # docstring pour pourquoi cette distinction compte
+                # (bascule automatique sur Shion local dans
+                # _DeepSeekAvecReplisLocal).
+                raise DeepSeekUnreachableError(
+                    "SHION/DeepSeek à %s a répondu par autre chose que du "
+                    "JSON (HTTP %d) -- probablement pas notre serveur vLLM "
+                    "(tunnel expiré, mauvaise URL ?)." % (self.base_url, e.code)
+                )
+            raise DeepSeekClientError(
+                self._traduire_http(e.code, corps_texte, self.model_name, self.max_tokens)
+            )
         except urllib.error.URLError as e:
             # BUGFIX : urlopen(..., timeout=...) enveloppe TOUJOURS un
             # dépassement de délai dans une URLError, jamais en TimeoutError
@@ -4810,19 +4891,26 @@ class DeepSeekClient(LLMClient):
             # jamais atteint, et l'utilisateur ne voyait jamais la piste
             # "augmentez DEEPSEEK_REQUEST_TIMEOUT_S", pourtant la plus utile
             # ici vu la lenteur normale d'un modèle de raisonnement.
+            #
+            # PAS DeepSeekUnreachableError pour le cas timeout : un serveur
+            # qui a établi la connexion mais répond lentement est bien LÀ
+            # (un modèle de raisonnement est juste lent) -- y voir une
+            # absence de serveur et basculer sur Shion local produirait une
+            # réponse dégradée alors qu'attendre plus longtemps aurait
+            # suffi. Seule une connexion qui n'aboutit MÊME PAS (refusée,
+            # DNS, etc.) signale une vraie absence d'endpoint.
             if isinstance(e.reason, TimeoutError):
                 raise DeepSeekClientError(
                     "SHION/DeepSeek n'a pas répondu en %ds. Un modèle de "
                     "raisonnement est lent : augmentez DEEPSEEK_REQUEST_TIMEOUT_S "
                     "avant de conclure à une panne." % self.timeout_s
                 )
-            raise DeepSeekClientError(
-                "SHION/DeepSeek injoignable à %s (%s). Le serveur vLLM est-il "
-                "démarré, et SHION_SERVER_URL pointe-t-elle dessus ?"
+            raise DeepSeekUnreachableError(
+                "SHION/DeepSeek injoignable à %s (%s)."
                 % (self.base_url, e.reason)
             )
         except json.JSONDecodeError:
-            raise DeepSeekClientError(
+            raise DeepSeekUnreachableError(
                 "SHION/DeepSeek a renvoyé une réponse illisible (JSON invalide) "
                 "-- %s sert-elle bien une API OpenAI-compatible ?" % self.base_url
             )
@@ -4904,6 +4992,82 @@ class _ShionNativeAdapter(LLMClient):
             self._client._history = []
 
 
+class _DeepSeekAvecReplisLocal(LLMClient):
+    """Enveloppe DeepSeekClient : bascule automatiquement sur le moteur
+    Shion NATIF (embarqué, voir _ShionNativeAdapter) si l'endpoint
+    DeepSeek configuré est injoignable -- PAS s'il répond par une erreur
+    applicative (mauvaise clé, contexte dépassé...), voir
+    DeepSeekUnreachableError pour la distinction exacte.
+
+    POURQUOI : SHION_SERVER_URL pointe typiquement vers un tunnel
+    temporaire (ex. ngrok sur une session Colab, voir
+    docs/SERVEUR_DEEPSEEK.md) qui n'existe que tant que son propriétaire
+    la garde ouverte. Deux situations où ce tunnel n'est plus joignable
+    sont NORMALES, pas des pannes à corriger : la session a fini par se
+    déconnecter (inactivité, limite de durée), ou ce dossier a été
+    partagé avec quelqu'un qui n'a jamais eu accès à cette session en
+    premier lieu. Dans les deux cas, SHION.ASK doit rester UTILISABLE --
+    dégradé, mais fonctionnel -- plutôt que de se contenter d'une erreur
+    de connexion. Shion natif (paquet shion/, poids fournis dans le
+    dépôt) ne dépend d'aucune infrastructure externe : c'est le repli qui
+    marche pour absolument quiconque ouvre ce projet.
+
+    Le repli est signalé EXPLICITEMENT dans le texte retourné (préfixe
+    ⚠️) plutôt que masqué : substituer silencieusement une réponse d'un
+    modèle 100x plus petit sans le dire serait trompeur, pas pratique."""
+
+    def __init__(self, deepseek_client: "DeepSeekClient"):
+        self._deepseek = deepseek_client
+        self._repli: Optional[_ShionNativeAdapter] = None  # construit paresseusement
+        self.nom_affichage = deepseek_client.nom_affichage
+
+    def _obtenir_repli_local(self) -> Optional[_ShionNativeAdapter]:
+        if self._repli is None:
+            if not HAS_SHION_NATIVE:
+                return None
+            natif = ShionServingClient(model_name=SHION_MODEL_NAME)
+            # Force le chemin LOCAL directement, sans que ShionServingClient
+            # ne perde plusieurs secondes à tenter SA PROPRE URL de serveur
+            # distant (SHION_SERVER_URL vaut ici l'endpoint DeepSeek qu'on
+            # vient déjà de confirmer injoignable, pas un serveur Shion) --
+            # même mécanisme de cooldown que celui utilisé en usage normal
+            # dans ShionServingClient.complete(), détourné ici pour un
+            # effet immédiat et permanent sur cette instance.
+            natif._serveur_indisponible_jusqua = float("inf")
+            self._repli = _ShionNativeAdapter(natif)
+        return self._repli
+
+    def complete(self, prompt: str, remember: bool = True) -> str:
+        try:
+            return self._deepseek.complete(prompt, remember=remember)
+        except DeepSeekUnreachableError:
+            pass  # repli ci-dessous, hors du bloc except (ne pas chaîner si LUI échoue aussi)
+
+        repli = self._obtenir_repli_local()
+        if repli is None:
+            raise DeepSeekClientError(
+                "SHION/DeepSeek injoignable à %s, ET le paquet shion/ (repli "
+                "local) est absent de ce dossier." % self._deepseek.base_url
+            )
+        try:
+            reponse = repli.complete(prompt, remember=remember)
+        except LLMClientError as e:
+            raise DeepSeekClientError(
+                "SHION/DeepSeek injoignable à %s, ET le repli local Shion a "
+                "aussi échoué : %s" % (self._deepseek.base_url, e)
+            )
+        return (
+            "⚠️ DeepSeek injoignable (tunnel expiré ou URL obsolète) -- "
+            "réponse de Shion local, un modèle très réduit, à titre de "
+            "repli :\n\n" + reponse
+        )
+
+    def reset_history(self) -> None:
+        self._deepseek.reset_history()
+        if self._repli is not None:
+            self._repli.reset_history()
+
+
 def _build_shion_client():
     """Fabrique le client branché derrière SHION.ASK, selon SHION_BACKEND.
 
@@ -4920,7 +5084,8 @@ def _build_shion_client():
             return None
         natif = ShionServingClient(base_url=SHION_SERVER_URL, model_name=SHION_MODEL_NAME)
         return _ShionNativeAdapter(natif)
-    return DeepSeekClient(base_url=SHION_SERVER_URL, model_name=DEEPSEEK_MODEL_NAME)
+    deepseek = DeepSeekClient(base_url=SHION_SERVER_URL, model_name=DEEPSEEK_MODEL_NAME)
+    return _DeepSeekAvecReplisLocal(deepseek)
 
 
 # =============================================================================

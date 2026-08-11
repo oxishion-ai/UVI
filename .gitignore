@@ -2,6 +2,11 @@ __pycache__/
 *.pyc
 .claude/
 
+# Config SHION locale (URL de tunnel, cle d'API...) : propre a UNE
+# session de calcul de SON auteur, jamais a partager. Voir
+# _charger_config_shion_locale dans uvi_core.py.
+.shion.local.env
+
 # État d'optimiseur (memmap Adam m/v) : régénéré à chaque entraînement,
 # aucun intérêt à le versionner -- peut peser plusieurs centaines de Mo
 # pour Shion-Micro/Base.
