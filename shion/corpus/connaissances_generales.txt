@@ -1,0 +1,47 @@
+La Terre est la troisieme planete du systeme solaire, en partant du soleil. Elle est la seule planete connue a abriter la vie. Sa surface est couverte a environ soixante-dix pour cent d'eau. L'atmosphere terrestre est composee principalement d'azote et d'oxygene. La Terre met environ trois cent soixante-cinq jours a faire le tour du soleil, ce qui definit une annee. Elle tourne aussi sur elle-meme en environ vingt-quatre heures, ce qui definit un jour.
+
+La Lune est le seul satellite naturel de la Terre. Elle influence les marees des oceans par sa gravite. La Lune met environ vingt-neuf jours a effectuer un cycle complet de phases, de la nouvelle lune a la pleine lune. Les astronautes ont marche sur la Lune pour la premiere fois en mille neuf cent soixante-neuf.
+
+Le systeme solaire comprend huit planetes : Mercure, Venus, la Terre, Mars, Jupiter, Saturne, Uranus et Neptune. Mercure est la plus proche du soleil, Neptune la plus eloignee. Jupiter est la plus grande planete, tandis que Mercure est la plus petite. Saturne est connue pour ses anneaux spectaculaires composes de glace et de roche.
+
+L'eau existe sous trois etats : solide, liquide et gazeux. A zero degre Celsius, l'eau gele et devient de la glace. A cent degres Celsius, au niveau de la mer, l'eau bout et se transforme en vapeur. Le cycle de l'eau decrit son mouvement constant entre les oceans, l'atmosphere et la terre, par evaporation, condensation et precipitation.
+
+Les plantes produisent leur propre nourriture grace a la photosynthese. Ce processus utilise la lumiere du soleil, l'eau et le dioxyde de carbone pour produire du glucose et de l'oxygene. C'est pourquoi les plantes sont essentielles a la vie sur Terre : elles produisent l'oxygene que respirent les animaux.
+
+Un atome est la plus petite unite de matiere qui conserve les proprietes chimiques d'un element. Il est compose d'un noyau, contenant des protons et des neutrons, entoure d'electrons. Le nombre de protons determine l'element chimique. L'hydrogene, l'element le plus simple, n'a qu'un seul proton.
+
+La gravite est la force qui attire les objets ayant une masse les uns vers les autres. C'est elle qui nous maintient au sol et qui fait tourner les planetes autour du soleil. Isaac Newton a formule la loi de la gravitation universelle au dix-septieme siecle. Albert Einstein a plus tard affine cette comprehension avec la theorie de la relativite generale.
+
+L'histoire humaine est generalement divisee en periodes : la prehistoire, l'antiquite, le moyen age, l'epoque moderne et l'epoque contemporaine. L'ecriture est apparue il y a environ cinq mille ans, marquant la fin de la prehistoire. Les civilisations anciennes incluent l'Egypte, la Mesopotamie, la Grece et Rome.
+
+La Revolution francaise a commence en mille sept cent quatre-vingt-neuf. Elle a mene a la chute de la monarchie et a l'etablissement de la republique en France. Les idees de liberte, egalite et fraternite sont issues de cette periode.
+
+La Deuxieme Guerre mondiale s'est deroulee de mille neuf cent trente-neuf a mille neuf cent quarante-cinq. Elle a implique la plupart des nations du monde et a cause des millions de morts. Elle s'est terminee par la defaite de l'Allemagne nazie et du Japon imperial.
+
+Un ordinateur moderne fonctionne grace a des circuits electroniques qui traitent l'information sous forme binaire, c'est-a-dire des zeros et des uns. Le processeur execute des instructions tres rapidement, plusieurs milliards de fois par seconde. La memoire vive stocke temporairement les donnees en cours d'utilisation, tandis que le disque dur ou le disque SSD conserve les donnees de maniere permanente.
+
+Un langage de programmation est un ensemble de regles permettant d'ecrire des instructions comprehensibles par un ordinateur. Python, Java, C++ et JavaScript sont des exemples de langages de programmation populaires. Chaque langage a sa propre syntaxe et ses propres usages privilegies : Python est souvent utilise pour la science des donnees, JavaScript pour le developpement web.
+
+Internet est un reseau mondial reliant des milliards d'appareils. Il a ete developpe a partir des annees mille neuf cent soixante-dix, mais s'est veritablement popularise dans les annees mille neuf cent quatre-vingt-dix avec l'apparition du World Wide Web. Aujourd'hui, internet permet la communication instantanee, le partage d'informations et le commerce electronique a l'echelle mondiale.
+
+Le corps humain est compose de plusieurs systemes qui travaillent ensemble : le systeme nerveux controle les fonctions du corps, le systeme circulatoire transporte le sang, le systeme respiratoire permet les echanges gazeux, et le systeme digestif transforme la nourriture en energie utilisable.
+
+Le coeur humain bat environ soixante-dix fois par minute au repos. Il pompe le sang a travers tout le corps, apportant l'oxygene et les nutriments necessaires aux cellules. Un adulte possede environ cinq litres de sang dans son corps.
+
+Le cerveau humain contient environ quatre-vingt-six milliards de neurones. Il controle la pensee, la memoire, les emotions et les mouvements du corps. Les neurones communiquent entre eux grace a des signaux electriques et chimiques.
+
+La France est un pays d'Europe de l'Ouest, dont la capitale est Paris. Elle est connue pour sa gastronomie, son histoire, ses monuments comme la Tour Eiffel, et sa langue parlee dans de nombreux pays a travers le monde. La France partage des frontieres avec l'Espagne, l'Italie, l'Allemagne, la Belgique et plusieurs autres pays.
+
+Paris est la capitale de la France depuis des siecles. La ville abrite des monuments celebres comme la Tour Eiffel, le Louvre et Notre-Dame. La Tour Eiffel a ete construite en mille huit cent quatre-vingt-neuf pour l'Exposition universelle.
+
+Les saisons sont causees par l'inclinaison de l'axe de la Terre par rapport au soleil. Il y a quatre saisons dans les regions temperees : le printemps, l'ete, l'automne et l'hiver. Pendant l'ete de l'hemisphere nord, c'est l'hiver dans l'hemisphere sud, et inversement.
+
+Les animaux se divisent en plusieurs grandes categories : les mammiferes, les oiseaux, les poissons, les reptiles, les amphibiens et les insectes. Les mammiferes se caracterisent par le fait qu'ils allaitent leurs petits. Les oiseaux ont des plumes et la plupart peuvent voler.
+
+La musique est un art qui utilise le son organise dans le temps. Elle existe dans toutes les cultures humaines depuis des millenaires. Les instruments de musique se classent en categories : les cordes comme le violon, les vents comme la flute, les percussions comme le tambour.
+
+La lecture est une activite qui permet d'acquerir des connaissances et de developper l'imagination. Les livres existent sous forme papier ou numerique. La bibliotheque est un lieu ou l'on peut emprunter des livres gratuitement.
+
+L'alimentation equilibree comprend des fruits, des legumes, des proteines, des feculents et des matieres grasses en quantites raisonnables. Boire suffisamment d'eau est essentiel pour la sante du corps humain, qui est compose d'environ soixante pour cent d'eau.
+
+Le sport est benefique pour la sante physique et mentale. Il existe de nombreux sports : le football, le basketball, la natation, la course a pied, le tennis, et bien d'autres. L'exercice regulier renforce le coeur, les muscles et ameliore l'humeur.

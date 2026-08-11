@@ -1,0 +1,155 @@
+Q: Comment lire un fichier ligne par ligne en Python ?
+R: with open('fichier.txt') as f:\n    for ligne in f:\n        print(ligne.strip())
+
+Q: Comment ecrire dans un fichier en Python ?
+R: with open('fichier.txt', 'w') as f:\n    f.write('bonjour')
+
+Q: Comment ajouter du texte a la fin d'un fichier existant ?
+R: with open('fichier.txt', 'a') as f:\n    f.write('nouvelle ligne\\n')
+
+Q: Quelle est la difference entre les modes 'r', 'w' et 'a' pour ouvrir un fichier ?
+R: 'r' lit le fichier, 'w' l'ecrase et ecrit, 'a' ajoute a la fin sans effacer le contenu existant.
+
+Q: Comment verifier si une cle existe dans un dictionnaire ?
+R: if 'cle' in mon_dict: verifie la presence de la cle sans lever d'erreur.
+
+Q: Comment obtenir une valeur par defaut si la cle n'existe pas ?
+R: mon_dict.get('cle', 'valeur_par_defaut') retourne la valeur par defaut si la cle est absente.
+
+Q: Comment fusionner deux listes en Python ?
+R: liste_fusionnee = liste1 + liste2 concatene les deux listes.
+
+Q: Comment supprimer les doublons d'une liste ?
+R: liste_unique = list(set(ma_liste)) supprime les doublons mais ne conserve pas l'ordre.
+
+Q: Comment garder l'ordre en supprimant les doublons d'une liste ?
+R: list(dict.fromkeys(ma_liste)) supprime les doublons en conservant l'ordre d'apparition.
+
+Q: Comment inverser une liste en Python ?
+R: ma_liste.reverse() inverse en place, ou ma_liste[::-1] retourne une nouvelle liste inversee.
+
+Q: Comment compter les occurrences d'un element dans une liste ?
+R: ma_liste.count(element) retourne le nombre d'occurrences de cet element.
+
+Q: Comment trouver l'index d'un element dans une liste ?
+R: ma_liste.index(element) retourne l'index de la premiere occurrence.
+
+Q: Comment verifier si tous les elements d'une liste satisfont une condition ?
+R: all(x > 0 for x in ma_liste) retourne vrai si tous les elements sont positifs.
+
+Q: Comment verifier si au moins un element satisfait une condition ?
+R: any(x > 0 for x in ma_liste) retourne vrai si au moins un element est positif.
+
+Q: Comment appliquer une fonction a chaque element d'une liste ?
+R: liste(map(fonction, ma_liste)) applique la fonction a chaque element.
+
+Q: Comment filtrer une liste selon une condition ?
+R: list(filter(lambda x: x > 0, ma_liste)) garde seulement les elements positifs.
+
+Q: Quelle est la difference entre une methode et une fonction en Python ?
+R: Une methode est une fonction associee a un objet, appelee via la notation objet.methode().
+
+Q: Comment convertir une chaine en entier ?
+R: int("42") convertit la chaine "42" en l'entier 42.
+
+Q: Comment convertir un entier en chaine ?
+R: str(42) convertit l'entier 42 en la chaine "42".
+
+Q: Comment convertir une chaine en nombre a virgule flottante ?
+R: float("3.14") convertit la chaine en le nombre 3.14.
+
+Q: Comment verifier le type d'une variable en Python ?
+R: type(variable) retourne le type, ou isinstance(variable, int) verifie un type specifique.
+
+Q: Comment obtenir la longueur d'une liste ou d'une chaine ?
+R: len(ma_liste) ou len(ma_chaine) retourne le nombre d'elements ou de caracteres.
+
+Q: Comment mettre en majuscule une chaine en Python ?
+R: ma_chaine.upper() retourne la chaine en majuscules.
+
+Q: Comment mettre en minuscule une chaine en Python ?
+R: ma_chaine.lower() retourne la chaine en minuscules.
+
+Q: Comment supprimer les espaces au debut et a la fin d'une chaine ?
+R: ma_chaine.strip() retire les espaces en debut et fin de chaine.
+
+Q: Comment diviser une chaine en liste de mots ?
+R: ma_chaine.split() divise la chaine selon les espaces par defaut.
+
+Q: Comment joindre une liste de chaines en une seule chaine ?
+R: " ".join(liste_de_mots) joint les mots avec un espace entre chacun.
+
+Q: Comment remplacer une sous-chaine dans une chaine ?
+R: ma_chaine.replace("ancien", "nouveau") remplace toutes les occurrences.
+
+Q: Comment verifier si une chaine commence par un prefixe donne ?
+R: ma_chaine.startswith("bonjour") retourne vrai si la chaine commence ainsi.
+
+Q: Comment verifier si une chaine se termine par un suffixe donne ?
+R: ma_chaine.endswith(".txt") retourne vrai si la chaine se termine ainsi.
+
+Q: Qu'est-ce qu'une docstring en Python ?
+R: Une docstring est une chaine de documentation placee au debut d'une fonction, classe ou module, entre triple guillemets.
+
+Q: Comment acceder a la docstring d'une fonction ?
+R: help(ma_fonction) affiche la docstring, ou ma_fonction.__doc__ y accede directement.
+
+Q: Qu'est-ce qu'un decorateur avec parametres en Python ?
+R: Un decorateur parametre est une fonction qui retourne un decorateur, permettant de le configurer a l'usage.
+
+Q: Comment creer un singleton en Python ?
+R: On peut utiliser un module (qui n'est charge qu'une fois) ou surcharger __new__ pour garantir une seule instance.
+
+Q: Qu'est-ce que le pattern factory ?
+R: Le pattern factory delegue la creation d'objets a une fonction ou classe dediee, plutot que d'appeler directement le constructeur.
+
+Q: Qu'est-ce qu'une interface en Python ?
+R: Python n'a pas d'interfaces formelles comme Java, mais utilise les classes abstraites (ABC) ou le duck typing pour un effet similaire.
+
+Q: Qu'est-ce qu'une classe abstraite avec le module abc ?
+R: from abc import ABC, abstractmethod\nclass Forme(ABC):\n    @abstractmethod\n    def aire(self):\n        pass
+
+Q: Peut-on instancier une classe abstraite en Python ?
+R: Non, une classe contenant une methode abstraite non implementee ne peut pas etre instanciee directement.
+
+Q: Qu'est-ce que l'injection de dependances ?
+R: L'injection de dependances consiste a fournir les dependances d'un objet depuis l'exterieur plutot que de les creer en interne.
+
+Q: Comment gerer plusieurs exceptions dans un seul bloc except ?
+R: except (TypeError, ValueError) as e: capture les deux types d'exceptions dans le meme bloc.
+
+Q: Comment relancer une exception apres l'avoir capturee ?
+R: Dans un bloc except, l'instruction raise seule relance l'exception capturee.
+
+Q: Qu'est-ce qu'un context manager personnalise avec des methodes __enter__ et __exit__ ?
+R: class MonContexte:\n    def __enter__(self):\n        return self\n    def __exit__(self, *args):\n        pass
+
+Q: Comment mesurer le temps d'execution d'une fonction avec un decorateur ?
+R: def chrono(fonc):\n    def wrapper(*a, **k):\n        debut = time.time()\n        r = fonc(*a, **k)\n        print(time.time() - debut)\n        return r\n    return wrapper
+
+Q: Qu'est-ce qu'une variable de classe en Python ?
+R: Une variable de classe est partagee par toutes les instances, definie directement dans le corps de la classe, hors de __init__.
+
+Q: Quelle est la difference entre une variable de classe et une variable d'instance ?
+R: La variable de classe est partagee entre toutes les instances, la variable d'instance est propre a chaque objet.
+
+Q: Comment appeler la methode de la classe parente en Python ?
+R: super().nom_methode() appelle la methode de la classe parente depuis une sous-classe.
+
+Q: Qu'est-ce que le MRO en Python ?
+R: Le MRO, method resolution order, est l'ordre dans lequel Python cherche les methodes en cas d'heritage multiple.
+
+Q: Comment verifier qu'une classe herite d'une autre ?
+R: issubclass(SousClasse, ClasseParente) retourne vrai si l'heritage existe.
+
+Q: Qu'est-ce qu'une exception personnalisee avec des attributs ?
+R: class ErreurValidation(Exception):\n    def __init__(self, message, champ):\n        super().__init__(message)\n        self.champ = champ
+
+Q: Comment ecrire une expression conditionnelle en une ligne en Python ?
+R: resultat = "positif" if x > 0 else "negatif" est une expression conditionnelle, aussi appelee operateur ternaire.
+
+Q: Comment creer une liste de nombres pairs avec une comprehension ?
+R: pairs = [x for x in range(20) if x % 2 == 0]
+
+Q: Comment creer un dictionnaire inverse, cle et valeur echangees ?
+R: inverse = {v: k for k, v in mon_dict.items()}

@@ -1,0 +1,57 @@
+Python est un langage de programmation cree par Guido van Rossum et publie pour la premiere fois en mille neuf cent quatre-vingt-onze. Il est concu pour etre lisible et simple a apprendre, avec une syntaxe qui ressemble a du pseudo-code. Python est utilise dans de nombreux domaines : le developpement web, la science des donnees, l'intelligence artificielle, l'automatisation et le calcul scientifique.
+
+Les variables en Python ne necessitent pas de declaration de type explicite. Quand on ecrit x = 5, Python determine automatiquement que x est un entier. Si on ecrit ensuite x = "bonjour", la meme variable devient une chaine de caracteres. C'est ce qu'on appelle le typage dynamique.
+
+Les listes en Python sont des collections ordonnees et modifiables d'elements. On les cree avec des crochets : ma_liste = [1, 2, 3]. On peut ajouter un element avec ma_liste.append(4), ou en retirer un avec ma_liste.remove(2). Les listes peuvent contenir des elements de types differents dans une meme liste.
+
+Les tuples ressemblent aux listes mais sont immuables : une fois crees, ils ne peuvent plus etre modifies. On les cree avec des parentheses : mon_tuple = (1, 2, 3). Les tuples sont souvent utilises pour des donnees qui ne doivent pas changer, comme des coordonnees.
+
+Les dictionnaires associent des cles a des valeurs. On les cree avec des accolades : mon_dict = {"nom": "Alice", "age": 30}. On accede a une valeur par sa cle : mon_dict["nom"] retourne "Alice". Les dictionnaires sont tres efficaces pour rechercher une valeur a partir d'une cle connue.
+
+Les boucles for permettent de repeter une action pour chaque element d'une sequence. Par exemple, for i in range(5): print(i) affiche les nombres de zero a quatre. On peut aussi iterer directement sur les elements d'une liste : for element in ma_liste: print(element).
+
+Les boucles while repetent une action tant qu'une condition reste vraie. Par exemple, while x < 10: x += 1 augmente x jusqu'a ce qu'il atteigne dix. Il faut faire attention a ne pas creer de boucle infinie en oubliant de modifier la condition.
+
+Les fonctions permettent de regrouper du code reutilisable. On les definit avec le mot-cle def : def addition(a, b): return a + b. On appelle ensuite la fonction avec addition(3, 4), ce qui retourne sept. Les fonctions peuvent avoir des parametres par defaut, comme def saluer(nom="monde"): return "Bonjour " + nom.
+
+Les conditions if, elif et else permettent d'executer differents blocs de code selon des conditions. Par exemple : if x > 0: print("positif") elif x < 0: print("negatif") else: print("zero"). Seul le premier bloc dont la condition est vraie sera execute.
+
+Les exceptions permettent de gerer les erreurs de maniere controlee. Le bloc try contient le code qui pourrait echouer, et le bloc except capture l'erreur si elle se produit. Par exemple : try: resultat = 10 / 0 except ZeroDivisionError: print("Division par zero impossible").
+
+Les classes permettent de creer ses propres types d'objets en Python. Une classe definit des attributs, qui stockent des donnees, et des methodes, qui definissent des comportements. On cree une instance d'une classe en appelant son nom comme une fonction : mon_objet = MaClasse().
+
+L'heritage permet a une classe de reutiliser le code d'une autre classe. Si class Chien(Animal): herite de la classe Animal, elle possede tous ses attributs et methodes, et peut en ajouter ou en redefinir de nouveaux.
+
+Les modules permettent d'organiser le code Python en fichiers separes et reutilisables. On importe un module avec le mot-cle import : import math permet ensuite d'utiliser math.sqrt(16). On peut aussi importer seulement certains elements : from math import sqrt.
+
+Les packages sont des dossiers contenant plusieurs modules, organises hierarchiquement. Un package doit contenir un fichier __init__.py pour etre reconnu comme tel par Python, meme si ce fichier peut etre vide.
+
+L'indentation est essentielle en Python : contrairement a d'autres langages qui utilisent des accolades, Python utilise l'indentation pour delimiter les blocs de code. Une erreur d'indentation provoque une erreur de syntaxe. La convention standard est d'utiliser quatre espaces par niveau d'indentation.
+
+Les commentaires en Python commencent par le symbole diese : # Ceci est un commentaire. Ils sont ignores par l'interpreteur et servent uniquement a documenter le code pour les developpeurs humains. Les commentaires sur plusieurs lignes peuvent utiliser des triples guillemets.
+
+Les chaines de caracteres en Python peuvent etre delimitees par des guillemets simples ou doubles : "bonjour" ou 'bonjour' sont equivalents. On peut les concatener avec l'operateur plus : "bonjour" + " " + "monde". Les f-strings permettent d'inserer des variables directement : f"Bonjour {nom}".
+
+Les operateurs arithmetiques en Python incluent l'addition (+), la soustraction (-), la multiplication (*), la division (/), la division entiere (//), le modulo (%) et la puissance (**). Par exemple, 7 // 2 donne 3, et 7 % 2 donne 1.
+
+Les operateurs de comparaison retournent un booleen, vrai ou faux. Ils incluent egal a (==), different de (!=), superieur a (>), inferieur a (<), superieur ou egal (>=) et inferieur ou egal (<=). Ces operateurs sont souvent utilises dans les conditions.
+
+Les operateurs logiques and, or et not combinent des expressions booleennes. x > 0 and x < 10 est vrai seulement si x est strictement entre zero et dix. not x inverse la valeur booleenne de x.
+
+L'indexation en Python commence a zero. Dans une liste ma_liste = [10, 20, 30], ma_liste[0] vaut 10, et ma_liste[2] vaut 30. On peut aussi utiliser des indices negatifs : ma_liste[-1] retourne le dernier element, ici 30.
+
+Le slicing permet d'extraire une portion d'une sequence. ma_liste[1:3] retourne les elements d'index un et deux, sans inclure l'index trois. ma_liste[:2] retourne les deux premiers elements, et ma_liste[2:] retourne tous les elements a partir de l'index deux.
+
+La programmation orientee objet organise le code autour d'objets qui combinent donnees et comportements. Les principes fondamentaux sont l'encapsulation, l'heritage et le polymorphisme. Python supporte pleinement ce paradigme, tout en restant flexible.
+
+Le debogage consiste a trouver et corriger les erreurs dans un programme. Les techniques courantes incluent l'utilisation de print pour afficher des valeurs intermediaires, l'utilisation d'un debogueur comme pdb, et la lecture attentive des messages d'erreur.
+
+Un environnement de developpement integre, ou IDE, est un logiciel qui regroupe les outils necessaires pour ecrire du code : editeur de texte, debogueur, terminal integre. Des exemples populaires incluent VS Code, PyCharm et Jupyter Notebook.
+
+Le controle de version, comme Git, permet de suivre les modifications d'un code source dans le temps. Il permet a plusieurs personnes de collaborer sur un meme projet sans ecraser le travail des autres, et de revenir a une version anterieure en cas de probleme.
+
+La programmation fonctionnelle est un paradigme ou les fonctions sont traitees comme des valeurs de premiere classe. Python supporte ce style avec des fonctions comme map, filter et reduce, ainsi que les expressions lambda.
+
+Un test unitaire verifie qu'une petite partie du code, generalement une fonction, se comporte comme attendu. Ecrire des tests permet de detecter les regressions quand le code change, et donne confiance dans la fiabilite du programme.
+
+Les API, interfaces de programmation, permettent a differents programmes de communiquer entre eux. Une API web recoit generalement des requetes HTTP et retourne des donnees, souvent au format JSON.

@@ -1,0 +1,275 @@
+Q: A quoi sert le module os en Python ?
+R: Le module os permet d'interagir avec le systeme d'exploitation : fichiers, dossiers, variables d'environnement, processus.
+
+Q: Comment lister les fichiers d'un dossier en Python ?
+R: import os\nfichiers = os.listdir('mon_dossier')
+
+Q: Comment obtenir le chemin courant en Python ?
+R: import os\nos.getcwd() retourne le repertoire de travail courant.
+
+Q: Comment creer un dossier en Python ?
+R: os.makedirs('nom_dossier', exist_ok=True) cree le dossier, sans erreur s'il existe deja.
+
+Q: Comment supprimer un fichier en Python ?
+R: os.remove('fichier.txt') supprime le fichier indique.
+
+Q: A quoi sert le module pathlib ?
+R: pathlib offre une interface orientee objet pour manipuler les chemins de fichiers, plus moderne que os.path.
+
+Q: Comment utiliser pathlib pour lister des fichiers ?
+R: from pathlib import Path\nfor f in Path('.').iterdir():\n    print(f)
+
+Q: Comment joindre deux chemins avec pathlib ?
+R: chemin = Path('dossier') / 'fichier.txt'
+
+Q: Comment verifier qu'un fichier existe en Python ?
+R: from pathlib import Path\nPath('fichier.txt').exists()
+
+Q: A quoi sert le module sys ?
+R: sys donne acces aux parametres et fonctions specifiques a l'interpreteur Python, comme sys.argv ou sys.exit.
+
+Q: Comment lire les arguments de la ligne de commande en Python ?
+R: import sys\nargs = sys.argv[1:]  # sys.argv[0] est le nom du script
+
+Q: A quoi sert le module argparse ?
+R: argparse simplifie l'analyse des arguments de ligne de commande, avec aide automatique et validation.
+
+Q: Comment definir un argument avec argparse ?
+R: parser = argparse.ArgumentParser()\nparser.add_argument('--nom', type=str, default='monde')\nargs = parser.parse_args()
+
+Q: A quoi sert le module json en Python ?
+R: json permet de convertir entre objets Python et le format JSON, via json.dumps et json.loads.
+
+Q: Comment ecrire un objet Python en JSON dans un fichier ?
+R: import json\nwith open('donnees.json', 'w') as f:\n    json.dump(objet, f)
+
+Q: Comment lire un fichier JSON en Python ?
+R: import json\nwith open('donnees.json') as f:\n    donnees = json.load(f)
+
+Q: A quoi sert le module re en Python ?
+R: re fournit les expressions regulieres pour rechercher et manipuler du texte selon des motifs.
+
+Q: Comment chercher un motif dans une chaine avec re ?
+R: import re\nresultat = re.search(r'\\d+', texte)
+
+Q: Comment remplacer du texte avec re.sub ?
+R: import re\nnouveau = re.sub(r'\\s+', ' ', texte)
+
+Q: A quoi sert le module datetime ?
+R: datetime gere les dates et heures : creation, formatage, calculs de duree.
+
+Q: Comment obtenir la date du jour en Python ?
+R: from datetime import date\naujourdhui = date.today()
+
+Q: Comment formater une date en Python ?
+R: date.strftime('%Y-%m-%d') formate une date selon le motif indique.
+
+Q: A quoi sert le module time ?
+R: time donne acces a l'heure systeme et permet de mesurer des durees ou faire des pauses.
+
+Q: Comment mettre en pause un script Python ?
+R: import time\ntime.sleep(2)  # pause de 2 secondes
+
+Q: A quoi sert le module random ?
+R: random genere des nombres aleatoires, des choix aleatoires et des melanges de listes.
+
+Q: Comment tirer un nombre aleatoire en Python ?
+R: import random\nrandom.randint(1, 10)  # entier entre 1 et 10 inclus
+
+Q: Comment choisir un element au hasard dans une liste ?
+R: import random\nrandom.choice(ma_liste)
+
+Q: Comment melanger une liste en Python ?
+R: import random\nrandom.shuffle(ma_liste)  # modifie la liste en place
+
+Q: A quoi sert le module math en Python ?
+R: math fournit les fonctions mathematiques courantes : racine carree, puissance, trigonometrie.
+
+Q: Comment calculer une racine carree en Python ?
+R: import math\nmath.sqrt(16)  # retourne 4.0
+
+Q: A quoi sert le module string ?
+R: string fournit des constantes utiles, comme les lettres de l'alphabet ou la ponctuation.
+
+Q: A quoi sert le module subprocess ?
+R: subprocess permet de lancer et controler des processus externes depuis Python.
+
+Q: Comment executer une commande shell en Python ?
+R: import subprocess\nresultat = subprocess.run(['ls', '-l'], capture_output=True, text=True)
+
+Q: A quoi sert le module logging ?
+R: logging fournit un systeme de journalisation configurable, preferable a print pour le suivi d'une application.
+
+Q: Comment configurer un logger simple en Python ?
+R: import logging\nlogging.basicConfig(level=logging.INFO)\nlogging.info('message')
+
+Q: Quelle est la difference entre print et logging ?
+R: print affiche toujours, logging permet de filtrer par niveau de gravite et de rediriger vers un fichier.
+
+Q: A quoi sert le module csv ?
+R: csv permet de lire et ecrire des fichiers au format valeurs separees par virgule.
+
+Q: Comment lire un fichier CSV en Python ?
+R: import csv\nwith open('donnees.csv') as f:\n    lecteur = csv.reader(f)\n    for ligne in lecteur:\n        print(ligne)
+
+Q: A quoi sert le module io ?
+R: io fournit des outils pour travailler avec des flux de donnees, y compris en memoire.
+
+Q: A quoi sert le module shutil ?
+R: shutil fournit des operations de haut niveau sur les fichiers, comme copier ou deplacer.
+
+Q: Comment copier un fichier en Python ?
+R: import shutil\nshutil.copy('source.txt', 'destination.txt')
+
+Q: A quoi sert le module glob ?
+R: glob trouve les fichiers correspondant a un motif, comme *.txt.
+
+Q: Comment lister tous les fichiers .py d'un dossier ?
+R: import glob\nfichiers = glob.glob('*.py')
+
+Q: A quoi sert le module sqlite3 ?
+R: sqlite3 permet d'utiliser une base de donnees SQLite directement depuis Python, sans serveur separe.
+
+Q: Comment se connecter a une base SQLite ?
+R: import sqlite3\nconnexion = sqlite3.connect('base.db')
+
+Q: A quoi sert le module socket ?
+R: socket fournit une interface bas niveau pour la communication reseau.
+
+Q: A quoi sert le module threading ?
+R: threading permet d'executer plusieurs taches en parallele dans le meme processus, limite par le GIL.
+
+Q: Comment creer un thread en Python ?
+R: import threading\nt = threading.Thread(target=ma_fonction)\nt.start()
+
+Q: A quoi sert le module multiprocessing ?
+R: multiprocessing lance plusieurs processus separes, contournant le GIL pour du vrai parallelisme CPU.
+
+Q: A quoi sert le module heapq ?
+R: heapq implemente un tas binaire, utile pour recuperer efficacement le plus petit element.
+
+Q: A quoi sert le module bisect ?
+R: bisect gere l'insertion et la recherche dans une liste triee de facon efficace.
+
+Q: A quoi sert le module copy ?
+R: copy fournit copy() pour une copie superficielle et deepcopy() pour une copie profonde d'un objet.
+
+Q: Quelle est la difference entre copie superficielle et copie profonde ?
+R: Une copie superficielle partage les objets imbriques, une copie profonde les duplique entierement.
+
+Q: A quoi sert le module traceback ?
+R: traceback formate et affiche la pile d'appels d'une exception, utile pour le debogage.
+
+Q: Comment afficher une exception complete en Python ?
+R: import traceback\ntraceback.print_exc()
+
+Q: Que signifie une TypeError en Python ?
+R: TypeError signale une operation appliquee a un type de donnee incompatible.
+
+Q: Que signifie une ValueError en Python ?
+R: ValueError signale qu'une fonction a recu un argument du bon type mais d'une valeur invalide.
+
+Q: Que signifie une KeyError en Python ?
+R: KeyError signale l'acces a une cle absente d'un dictionnaire.
+
+Q: Que signifie une IndexError en Python ?
+R: IndexError signale un acces a un index hors des limites d'une sequence.
+
+Q: Que signifie une AttributeError en Python ?
+R: AttributeError signale l'acces a un attribut ou une methode qui n'existe pas sur l'objet.
+
+Q: Que signifie une ImportError en Python ?
+R: ImportError signale l'echec de l'import d'un module ou d'un nom depuis un module.
+
+Q: Que signifie une ZeroDivisionError en Python ?
+R: ZeroDivisionError signale une division par zero.
+
+Q: Que signifie une RecursionError en Python ?
+R: RecursionError signale qu'une fonction recursive a depasse la profondeur maximale d'appels.
+
+Q: Que signifie une NameError en Python ?
+R: NameError signale l'utilisation d'une variable ou d'un nom non defini.
+
+Q: Que signifie une StopIteration en Python ?
+R: StopIteration signale qu'un iterateur n'a plus de valeurs a produire.
+
+Q: Comment deboguer un script Python avec pdb ?
+R: import pdb; pdb.set_trace() met le script en pause a cet endroit pour inspection interactive.
+
+Q: Comment lire une trace d'erreur Python ?
+R: On lit du bas vers le haut : la derniere ligne donne le type d'erreur, les lignes au-dessus la pile d'appels.
+
+Q: Qu'est-ce qu'un breakpoint en Python moderne ?
+R: L'appel a la fonction integree breakpoint() ouvre le debogueur, equivalent moderne de pdb.set_trace().
+
+Q: Comment profiler un script Python ?
+R: python -m cProfile mon_script.py affiche le temps passe dans chaque fonction.
+
+Q: Pourquoi une liste est-elle plus lente qu'un generateur pour un grand volume de donnees ?
+R: Une liste garde tout en memoire d'un coup, un generateur produit les valeurs a la demande, donc moins de memoire utilisee.
+
+Q: Comment creer un environnement virtuel Python ?
+R: python -m venv mon_env cree un environnement virtuel isole dans le dossier mon_env.
+
+Q: Comment activer un environnement virtuel sous Linux ?
+R: source mon_env/bin/activate
+
+Q: Comment activer un environnement virtuel sous Windows ?
+R: mon_env\\Scripts\\activate
+
+Q: Qu'est-ce qu'un fichier requirements.txt ?
+R: Un fichier requirements.txt liste les dependances d'un projet, installables avec pip install -r requirements.txt.
+
+Q: Qu'est-ce que pyproject.toml ?
+R: pyproject.toml est le fichier standard moderne de configuration d'un paquet Python, remplaçant progressivement setup.py.
+
+Q: Comment installer un paquet Python avec pip ?
+R: pip install nom_du_paquet
+
+Q: Comment figer les versions des dependances installees ?
+R: pip freeze > requirements.txt enregistre les versions exactes actuellement installees.
+
+Q: Qu'est-ce qu'un fixture en pytest ?
+R: Une fixture est une fonction decoree par @pytest.fixture qui prepare des donnees ou ressources reutilisables pour les tests.
+
+Q: Comment parametrer un test avec pytest ?
+R: @pytest.mark.parametrize("entree,attendu", [(1, 2), (2, 3)]) execute le test pour chaque jeu de valeurs.
+
+Q: Comment simuler un objet en test avec unittest.mock ?
+R: from unittest.mock import Mock\nfaux_objet = Mock()\nfaux_objet.methode.return_value = 42
+
+Q: A quoi sert unittest.mock.patch ?
+R: patch remplace temporairement un objet ou une fonction par un mock pendant la duree d'un test.
+
+Q: Comment lancer les tests avec pytest ?
+R: pytest lance automatiquement tous les fichiers test_*.py du dossier courant.
+
+Q: Qu'est-ce que la notation Big O ?
+R: La notation Big O decrit comment le temps ou la memoire d'un algorithme croit avec la taille des donnees.
+
+Q: Quelle est la complexite d'une recherche dans une liste Python ?
+R: O(n), car dans le pire cas chaque element doit etre teste.
+
+Q: Quelle est la complexite d'une recherche dans un dictionnaire Python ?
+R: O(1) en moyenne, grace au hachage des cles.
+
+Q: Quelle est la complexite du tri par defaut de Python ?
+R: Le tri de Python (Timsort) a une complexite de O(n log n).
+
+Q: Qu'est-ce qu'un algorithme de tri stable ?
+R: Un tri stable conserve l'ordre relatif des elements consideres egaux.
+
+Q: Qu'est-ce que la recherche dichotomique ?
+R: La recherche dichotomique divise repetitivement en deux l'espace de recherche dans une liste triee, en O(log n).
+
+Q: Qu'est-ce qu'une pile, en structure de donnees ?
+R: Une pile suit le principe dernier entre, premier sorti (LIFO) : append et pop en Python simulent une pile.
+
+Q: Qu'est-ce qu'une file, en structure de donnees ?
+R: Une file suit le principe premier entre, premier sorti (FIFO), implementee efficacement par collections.deque.
+
+Q: Qu'est-ce qu'un arbre binaire ?
+R: Un arbre binaire est une structure ou chaque noeud a au plus deux enfants, gauche et droit.
+
+Q: Qu'est-ce qu'une table de hachage ?
+R: Une table de hachage associe des cles a des valeurs via une fonction de hachage, offrant un acces en moyenne O(1) -- c'est le mecanisme derriere dict en Python.

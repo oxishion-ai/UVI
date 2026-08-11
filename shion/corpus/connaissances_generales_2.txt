@@ -1,0 +1,137 @@
+Q: Qu'est-ce que la photosynthese ?
+R: La photosynthese est le processus par lequel les plantes transforment la lumiere du soleil, l'eau et le dioxyde de carbone en energie et en oxygene.
+
+Q: Combien de temps vit un humain en moyenne ?
+R: L'esperance de vie moyenne varie selon les pays, generalement entre soixante-dix et quatre-vingt-cinq ans.
+
+Q: Qu'est-ce qu'un virus ?
+R: Un virus est un agent infectieux microscopique qui a besoin d'une cellule hote pour se reproduire.
+
+Q: Qu'est-ce qu'une bacterie ?
+R: Une bacterie est un micro-organisme unicellulaire, certaines sont utiles et d'autres pathogenes.
+
+Q: Qu'est-ce que le systeme immunitaire ?
+R: Le systeme immunitaire est l'ensemble des mecanismes qui protegent le corps contre les infections.
+
+Q: Combien d'os a le corps humain adulte ?
+R: Le corps humain adulte compte environ deux cent six os.
+
+Q: Quel est l'organe le plus grand du corps humain ?
+R: La peau est l'organe le plus grand du corps humain.
+
+Q: Qu'est-ce que l'ADN ?
+R: L'ADN est la molecule qui porte l'information genetique des etres vivants.
+
+Q: Qu'est-ce qu'une cellule ?
+R: Une cellule est l'unite de base structurelle et fonctionnelle de tous les etres vivants.
+
+Q: Qu'est-ce que l'evolution ?
+R: L'evolution est le processus par lequel les especes changent progressivement au fil des generations.
+
+Q: Qui a propose la theorie de l'evolution ?
+R: Charles Darwin a propose la theorie de l'evolution par selection naturelle au dix-neuvieme siecle.
+
+Q: Qu'est-ce qu'un ecosysteme ?
+R: Un ecosysteme est un ensemble d'organismes vivants et de leur environnement physique, en interaction.
+
+Q: Qu'est-ce que le rechauffement climatique ?
+R: Le rechauffement climatique est l'augmentation de la temperature moyenne de la Terre, liee aux emissions de gaz a effet de serre.
+
+Q: Qu'est-ce que l'effet de serre ?
+R: L'effet de serre est le phenomene par lequel certains gaz retiennent la chaleur dans l'atmosphere terrestre.
+
+Q: Qu'est-ce que l'energie solaire ?
+R: L'energie solaire est l'energie captee a partir de la lumiere du soleil, souvent via des panneaux photovoltaiques.
+
+Q: Qu'est-ce qu'un tremblement de terre ?
+R: Un tremblement de terre est une secousse du sol causee par un mouvement soudain des plaques tectoniques.
+
+Q: Qu'est-ce qu'un volcan ?
+R: Un volcan est une ouverture dans la croute terrestre par laquelle du magma peut s'echapper.
+
+Q: Combien y a-t-il d'oceans sur Terre ?
+R: On distingue generalement cinq oceans : Pacifique, Atlantique, Indien, Austral et Arctique.
+
+Q: Quel est le plus grand ocean du monde ?
+R: L'ocean Pacifique est le plus grand ocean du monde.
+
+Q: Quelle est la plus haute montagne du monde ?
+R: L'Everest, en Himalaya, est la plus haute montagne du monde.
+
+Q: Quel est le plus long fleuve du monde ?
+R: Le Nil et l'Amazone sont souvent cites comme les plus longs fleuves du monde, selon la methode de mesure.
+
+Q: Quel est le plus grand desert du monde ?
+R: Le desert de l'Antarctique est le plus grand desert du monde en superficie.
+
+Q: Combien de pays y a-t-il dans le monde ?
+R: Il y a environ cent quatre-vingt-quinze pays reconnus dans le monde.
+
+Q: Quelle est la langue la plus parlee au monde ?
+R: Le mandarin est la langue maternelle la plus parlee au monde, l'anglais est la plus parlee au total en comptant les secondes langues.
+
+Q: Qu'est-ce que la democratie ?
+R: La democratie est un systeme politique ou le pouvoir appartient au peuple, exerce directement ou par des representants elus.
+
+Q: Qu'est-ce qu'une constitution ?
+R: Une constitution est le texte fondamental qui definit l'organisation et les regles d'un Etat.
+
+Q: Qu'est-ce que l'economie ?
+R: L'economie etudie la production, la distribution et la consommation des biens et services.
+
+Q: Qu'est-ce que l'inflation ?
+R: L'inflation est la hausse generale et durable des prix dans une economie.
+
+Q: Qu'est-ce qu'une entreprise ?
+R: Une entreprise est une organisation qui produit des biens ou services en vue de generer des revenus.
+
+Q: Qu'est-ce que le commerce international ?
+R: Le commerce international est l'echange de biens et services entre differents pays.
+
+Q: Qu'est-ce qu'une monnaie ?
+R: Une monnaie est un moyen d'echange accepte pour l'achat de biens et services dans une economie.
+
+Q: Qu'est-ce que la philosophie ?
+R: La philosophie est l'etude rationnelle des questions fondamentales sur l'existence, la connaissance et la morale.
+
+Q: Qui etait Socrate ?
+R: Socrate etait un philosophe grec de l'Antiquite, considere comme l'un des fondateurs de la philosophie occidentale.
+
+Q: Qu'est-ce que l'art ?
+R: L'art est une expression creative humaine, sous forme visuelle, musicale, litteraire ou autre.
+
+Q: Qu'est-ce que la peinture ?
+R: La peinture est un art visuel qui utilise des pigments appliques sur une surface pour creer une image.
+
+Q: Qui a peint la Joconde ?
+R: Leonard de Vinci a peint la Joconde, au debut du seizieme siecle.
+
+Q: Qu'est-ce que la litterature ?
+R: La litterature regroupe les oeuvres ecrites considerees comme ayant une valeur artistique, comme les romans et la poesie.
+
+Q: Qu'est-ce qu'un roman ?
+R: Un roman est une oeuvre de fiction en prose, generalement de longueur substantielle.
+
+Q: Qu'est-ce que la poesie ?
+R: La poesie est une forme d'expression litteraire qui joue sur le rythme, les sonorites et les images des mots.
+
+Q: Qu'est-ce que le cinema ?
+R: Le cinema est un art qui raconte des histoires a travers des images en mouvement et du son.
+
+Q: Qu'est-ce que la photographie ?
+R: La photographie est la technique de capture d'images grace a la lumiere, initialement sur pellicule, aujourd'hui souvent numerique.
+
+Q: Qu'est-ce qu'une metaphore ?
+R: Une metaphore est une figure de style qui compare deux choses sans utiliser de mot de comparaison explicite.
+
+Q: Qu'est-ce que la grammaire ?
+R: La grammaire est l'ensemble des regles qui structurent une langue, incluant la syntaxe et la conjugaison.
+
+Q: Combien de lettres a l'alphabet francais ?
+R: L'alphabet francais compte vingt-six lettres.
+
+Q: Qu'est-ce qu'un synonyme ?
+R: Un synonyme est un mot qui a un sens identique ou tres proche d'un autre mot.
+
+Q: Qu'est-ce qu'un antonyme ?
+R: Un antonyme est un mot dont le sens est oppose a celui d'un autre mot.

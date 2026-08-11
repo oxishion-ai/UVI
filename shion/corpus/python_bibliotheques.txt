@@ -1,0 +1,110 @@
+Q: Qu'est-ce que NumPy ?
+R: NumPy est une bibliotheque Python pour le calcul numerique, centree sur les tableaux multidimensionnels efficaces.
+
+Q: Comment creer un tableau NumPy ?
+R: import numpy as np\ntableau = np.array([1, 2, 3])
+
+Q: Qu'est-ce qu'un tableau NumPy de zeros ?
+R: np.zeros((3, 3)) cree un tableau trois par trois rempli de zeros.
+
+Q: Comment multiplier deux tableaux NumPy ?
+R: a * b multiplie element par element, tandis que a @ b effectue une multiplication matricielle.
+
+Q: Qu'est-ce que Pandas ?
+R: Pandas est une bibliotheque Python pour la manipulation et l'analyse de donnees tabulaires, via les DataFrame.
+
+Q: Comment lire un fichier CSV avec Pandas ?
+R: import pandas as pd\ndf = pd.read_csv('donnees.csv')
+
+Q: Comment afficher les premieres lignes d'un DataFrame ?
+R: df.head() affiche les cinq premieres lignes par defaut.
+
+Q: Qu'est-ce que Matplotlib ?
+R: Matplotlib est une bibliotheque Python pour creer des graphiques et visualisations de donnees.
+
+Q: Comment tracer un graphique simple avec Matplotlib ?
+R: import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], [4, 5, 6])\nplt.show()
+
+Q: Qu'est-ce que la bibliotheque requests ?
+R: requests simplifie l'envoi de requetes HTTP en Python, pour interagir avec des API web.
+
+Q: Comment faire une requete GET avec requests ?
+R: import requests\nreponse = requests.get('https://exemple.com')
+
+Q: Comment recuperer du JSON depuis une requete HTTP ?
+R: reponse.json() convertit le corps de la reponse en objet Python.
+
+Q: Qu'est-ce que Flask ?
+R: Flask est un framework web Python leger, utilise pour creer des applications et API web simplement.
+
+Q: Comment creer une route simple avec Flask ?
+R: from flask import Flask\napp = Flask(__name__)\n@app.route('/')\ndef accueil():\n    return 'Bonjour'
+
+Q: Qu'est-ce que Django ?
+R: Django est un framework web Python complet, avec ORM, authentification et interface d'administration integres.
+
+Q: Qu'est-ce que scikit-learn ?
+R: scikit-learn est une bibliotheque Python d'apprentissage automatique, avec des algorithmes de classification et regression.
+
+Q: Qu'est-ce que TensorFlow ?
+R: TensorFlow est une bibliotheque de calcul numerique et d'apprentissage profond developpee par Google.
+
+Q: Qu'est-ce que PyTorch ?
+R: PyTorch est une bibliotheque d'apprentissage profond, connue pour sa flexibilite et son usage en recherche.
+
+Q: Qu'est-ce que Beautiful Soup ?
+R: Beautiful Soup est une bibliotheque Python pour extraire des donnees de pages HTML et XML.
+
+Q: Qu'est-ce que le web scraping ?
+R: Le web scraping consiste a extraire automatiquement des donnees de sites web.
+
+Q: Qu'est-ce qu'un environnement Jupyter Notebook ?
+R: Jupyter Notebook est un environnement interactif qui permet d'ecrire et executer du code Python par cellules, avec du texte et des graphiques.
+
+Q: Comment installer plusieurs paquets en une fois avec pip ?
+R: pip install numpy pandas matplotlib installe les trois paquets en une seule commande.
+
+Q: Qu'est-ce qu'un notebook .ipynb ?
+R: Un fichier .ipynb est un notebook Jupyter, qui contient du code, du texte et des resultats sous forme de cellules.
+
+Q: Comment convertir une liste en tableau NumPy et inversement ?
+R: np.array(ma_liste) convertit une liste en tableau, et tableau.tolist() fait l'inverse.
+
+Q: Qu'est-ce qu'un DataFrame Pandas ?
+R: Un DataFrame est une structure de donnees tabulaire a deux dimensions, avec des lignes et des colonnes nommees.
+
+Q: Comment filtrer un DataFrame Pandas ?
+R: df[df['colonne'] > 10] retourne les lignes ou la colonne depasse dix.
+
+Q: Comment grouper des donnees avec Pandas ?
+R: df.groupby('categorie').sum() regroupe les lignes par categorie et additionne les valeurs numeriques.
+
+Q: Qu'est-ce qu'un environnement conda ?
+R: conda est un gestionnaire de paquets et d'environnements, alternative a pip et venv, populaire en science des donnees.
+
+Q: Peux-tu m'aider a debugger mon code ?
+R: Bien sur, decris-moi l'erreur et montre-moi le code concerne.
+
+Q: Peux-tu m'expliquer ce code ?
+R: Bien sur, montre-moi le code et je ferai de mon mieux pour l'expliquer.
+
+Q: Peux-tu ecrire une fonction pour moi ?
+R: Bien sur, dis-moi ce que la fonction doit faire.
+
+Q: J'ai une erreur dans mon script, tu peux m'aider ?
+R: Bien sur, montre-moi le message d'erreur complet et le code correspondant.
+
+Q: Comment optimiser mon code Python ?
+R: Ca depend du code, mais on peut souvent gagner en utilisant des structures de donnees adaptees et en evitant les boucles inutiles.
+
+Q: Quelle est la meilleure facon d'apprendre Python ?
+R: Pratiquer regulierement avec de petits projets est generalement la meilleure facon d'apprendre.
+
+Q: Combien de temps faut-il pour apprendre Python ?
+R: Ca depend du rythme, mais les bases peuvent s'apprendre en quelques semaines de pratique reguliere.
+
+Q: Python est-il difficile a apprendre ?
+R: Python est reconnu comme l'un des langages les plus accessibles pour debuter en programmation.
+
+Q: Quel est le meilleur editeur pour Python ?
+R: VS Code et PyCharm sont deux choix populaires et bien adaptes a Python.
