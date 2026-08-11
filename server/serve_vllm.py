@@ -1,5 +1,6 @@
 import sys
 import asyncio
+import types
 import uvicorn
 
 # --- PATCH : contourner l'absence de uvloop sous Windows ---
@@ -9,6 +10,24 @@ class MockUvloop:
         pass
 # On remplace uvloop par un mock avant que vLLM ne l'importe
 sys.modules['uvloop'] = MockUvloop()
+
+# --- PATCH : contourner le conflit de version CUDA torch/torchaudio ---
+# transformers importe torchaudio de façon INCONDITIONNELLE (via
+# loss/loss_rnnt.py, pour un modèle audio Parakeet qu'on n'utilise jamais)
+# dès qu'on importe vllm. Sur certains environnements (ex. Colab avec un
+# torch plus récent que le torchaudio publié, comme torch cu13.0 vs
+# torchaudio cu12.8), torchaudio lève une RuntimeError À L'IMPORT à cause
+# de cette incompatibilité -- avant même qu'on ait pu s'en servir, alors
+# qu'on ne sert ici qu'un LLM texte et n'a besoin d'aucune fonctionnalité
+# audio. Un module factice vide dans sys.modules court-circuite cet
+# import : Python le trouve déjà "importé" et n'exécute jamais le vrai
+# __init__.py de torchaudio (donc jamais la vérification CUDA foireuse).
+# Même principe que le mock uvloop juste au-dessus.
+if 'torchaudio' not in sys.modules:
+    try:
+        import torchaudio  # noqa: F401  -- si ça marche déjà, tant mieux, rien à patcher
+    except Exception:
+        sys.modules['torchaudio'] = types.ModuleType('torchaudio')
 
 # --- Importer l'API server de vLLM ---
 from vllm.entrypoints.openai import api_server
