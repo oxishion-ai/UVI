@@ -50,13 +50,22 @@ else:
     launch_func = None
 
 # Définir les arguments comme si on les passait en ligne de commande
+#
+# --dtype half (float16) et non bfloat16 : bfloat16 exige une capacité de
+# calcul CUDA >= 8.0 (Ampere ou plus récent -- A100, RTX 3090/4090...).
+# Un T4 (capacité 7.5, ex. le GPU gratuit de Colab) le REFUSE au démarrage
+# avec "ValueError: Bfloat16 is only supported on GPUs with compute
+# capability of at least 8.0". float16 fonctionne sur les DEUX générations
+# -- légèrement moins stable numériquement que bf16 sur du tout récent
+# matériel, mais c'est le choix qui marche partout, donc le défaut le plus
+# sûr ici.
 sys.argv = [
     "serve",
     "--model", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
     "--served-model-name", "deepseek-r1-distill-qwen-7b",
     "--host", "0.0.0.0",
     "--port", "8000",
-    "--dtype", "bfloat16",
+    "--dtype", "half",
     "--max-model-len", "8192",
     "--gpu-memory-utilization", "0.90",
     "--tensor-parallel-size", "1",

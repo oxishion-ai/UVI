@@ -27,12 +27,30 @@ surcharge CUDA.
 
 | GPU | Verdict |
 |---|---|
-| **16 Go** | Serré en bf16. Plafonnez `--max-model-len` à 4096–8192, ou passez sur une quantification 4 bits (~5 Go) |
+| **16 Go** (ex. T4, Colab gratuit) | Serré en bf16 -- **et bf16 n'est de toute façon pas supporté**, voir ci-dessous. Plafonnez `--max-model-len` à 4096–8192, ou passez sur une quantification 4 bits (~5 Go) |
 | **24 Go** (RTX 3090 / 4090) | **Cible recommandée.** bf16 confortable avec un contexte substantiel |
 | **40–80 Go** (A100 / H100) | Trivial, contexte quasi complet possible |
 
 Un seul GPU suffit : `--tensor-parallel-size 1`. Ce modèle n'a pas besoin de
 multi-GPU.
+
+### `--dtype` selon la génération du GPU
+
+`bfloat16` exige une capacité de calcul CUDA >= 8.0 (Ampere ou plus récent :
+A100, RTX 3090/4090...). Sur un GPU Turing (**T4 inclus, capacité 7.5** --
+le GPU gratuit de Colab), vLLM refuse de démarrer :
+
+```
+ValueError: Bfloat16 is only supported on GPUs with compute capability of
+at least 8.0. Your Tesla T4 GPU has compute capability 7.5. You can use
+float16 instead by explicitly setting the `dtype` flag in CLI, for
+example: --dtype=half.
+```
+
+Sur T4 (et toute carte Turing ou plus ancienne), utilisez donc
+`--dtype half` (float16) au lieu de `--dtype bfloat16` -- fonctionne aussi
+sur les GPU plus récents, légèrement moins stable numériquement que bf16
+mais sans conséquence pratique pour du service de chat.
 
 ---
 
