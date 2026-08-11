@@ -15,28 +15,26 @@ sys.modules['uvloop'] = MockUvloop()
 # --- PATCH : contourner le conflit de version CUDA torch/torchaudio ---
 # transformers importe torchaudio de façon INCONDITIONNELLE (via
 # loss/loss_rnnt.py, pour un modèle audio Parakeet qu'on n'utilise jamais)
-# dès qu'on importe vllm. Sur certains environnements (ex. Colab avec un
-# torch plus récent que le torchaudio publié, comme torch cu13.0 vs
-# torchaudio cu12.8), torchaudio lève une RuntimeError À L'IMPORT à cause
-# de cette incompatibilité -- avant même qu'on ait pu s'en servir, alors
-# qu'on ne sert ici qu'un LLM texte et n'a besoin d'aucune fonctionnalité
-# audio. Un module factice vide dans sys.modules court-circuite cet
-# import : Python le trouve déjà "importé" et n'exécute jamais le vrai
-# __init__.py de torchaudio (donc jamais la vérification CUDA foireuse).
-# Même principe que le mock uvloop juste au-dessus.
+# dès qu'on importe vllm, ET vérifie séparément sa présence via
+# importlib.util.find_spec (transformers.utils.import_utils). Sur certains
+# environnements (ex. Colab avec un torch plus récent que le torchaudio
+# publié, comme torch cu13.0 vs torchaudio cu12.8), le vrai import de
+# torchaudio échoue en cours de route (RuntimeError dans sa vérification
+# CUDA) -- et CPython laisse alors une entrée CASSÉE dans sys.modules
+# (héritée de l'import partiel du paquet et de ses sous-modules), avec
+# __spec__ à None. Toute vérification ultérieure via find_spec (pas
+# seulement un nouvel `import torchaudio`) retrouve cette entrée cassée et
+# plante avec `ValueError: torchaudio.__spec__ is None` -- essayé une
+# première fois puis rattrapé après coup, ça arrivait déjà trop tard.
 #
-# __spec__ DOIT être un vrai ModuleSpec, pas None : transformers vérifie
-# aussi la présence de torchaudio via importlib.util.find_spec (pas
-# seulement `import torchaudio`), qui lève explicitement ValueError si le
-# module déjà présent dans sys.modules a un __spec__ à None -- un module
-# créé à la main avec types.ModuleType() n'en a pas par défaut.
+# Solution : poser le stub AVANT toute tentative d'import réel, pour que
+# le vrai __init__.py cassé de torchaudio ne s'exécute jamais et ne laisse
+# jamais cette entrée invalide derrière lui. On n'a de toute façon aucun
+# besoin de la vraie bibliothèque pour servir un LLM texte.
 if 'torchaudio' not in sys.modules:
-    try:
-        import torchaudio  # noqa: F401  -- si ça marche déjà, tant mieux, rien à patcher
-    except Exception:
-        stub = types.ModuleType('torchaudio')
-        stub.__spec__ = importlib.machinery.ModuleSpec('torchaudio', loader=None)
-        sys.modules['torchaudio'] = stub
+    stub = types.ModuleType('torchaudio')
+    stub.__spec__ = importlib.machinery.ModuleSpec('torchaudio', loader=None)
+    sys.modules['torchaudio'] = stub
 
 # --- Importer l'API server de vLLM ---
 from vllm.entrypoints.openai import api_server
