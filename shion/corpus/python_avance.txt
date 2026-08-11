@@ -1,0 +1,402 @@
+Python est un langage de programmation interprete, dynamique et oriente objet. Python favorise la lisibilite du code grace a une syntaxe claire et une indentation significative.
+
+Les variables en Python n'ont pas de type declare explicitement. Le type est determine a l'execution.
+
+x = 5
+y = 3.14
+nom = "Shion"
+actif = True
+liste = [1, 2, 3]
+tuple_valeurs = (1, 2, 3)
+dictionnaire = {"cle": "valeur"}
+ensemble = {1, 2, 3}
+
+Une fonction se definit avec le mot-cle def.
+
+def addition(a, b):
+    return a + b
+
+def saluer(nom="monde"):
+    return "Bonjour, " + nom
+
+def somme_variable(*args):
+    total = 0
+    for valeur in args:
+        total += valeur
+    return total
+
+def options(**kwargs):
+    for cle, valeur in kwargs.items():
+        print(cle, valeur)
+
+Les fonctions peuvent avoir des annotations de type pour plus de clarte.
+
+def multiplier(a: int, b: int) -> int:
+    return a * b
+
+def diviser(a: float, b: float) -> float:
+    if b == 0:
+        raise ValueError("division par zero")
+    return a / b
+
+Les listes en comprehension permettent de construire une liste en une seule ligne.
+
+carres = [n * n for n in range(10)]
+pairs = [n for n in range(20) if n % 2 == 0]
+matrice = [[i * j for j in range(3)] for i in range(3)]
+
+Les dictionnaires en comprehension suivent le meme principe.
+
+carres_dict = {n: n * n for n in range(10)}
+inverse = {valeur: cle for cle, valeur in carres_dict.items()}
+
+Une classe se definit avec le mot-cle class. Le constructeur s'appelle __init__.
+
+class Animal:
+    def __init__(self, nom, espece):
+        self.nom = nom
+        self.espece = espece
+
+    def se_presenter(self):
+        return "Je suis " + self.nom + ", un " + self.espece
+
+class Chien(Animal):
+    def __init__(self, nom):
+        super().__init__(nom, "chien")
+
+    def aboyer(self):
+        return "Wouf !"
+
+Les methodes speciales permettent de personnaliser le comportement d'une classe.
+
+class Vecteur:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __add__(self, autre):
+        return Vecteur(self.x + autre.x, self.y + autre.y)
+
+    def __repr__(self):
+        return "Vecteur(" + str(self.x) + ", " + str(self.y) + ")"
+
+    def __eq__(self, autre):
+        return self.x == autre.x and self.y == autre.y
+
+Un generateur utilise le mot-cle yield au lieu de return, et produit ses valeurs une par une, a la demande.
+
+def compteur(debut, fin):
+    valeur = debut
+    while valeur <= fin:
+        yield valeur
+        valeur += 1
+
+def fibonacci():
+    a, b = 0, 1
+    while True:
+        yield a
+        a, b = b, a + b
+
+Un decorateur est une fonction qui modifie le comportement d'une autre fonction sans changer son code.
+
+def chronometre(fonction):
+    import time
+    def enveloppe(*args, **kwargs):
+        debut = time.time()
+        resultat = fonction(*args, **kwargs)
+        duree = time.time() - debut
+        print("temps ecoule :", duree)
+        return resultat
+    return enveloppe
+
+@chronometre
+def calcul_long():
+    total = 0
+    for i in range(1000000):
+        total += i
+    return total
+
+Un gestionnaire de contexte utilise le mot-cle with, et repose sur les methodes __enter__ et __exit__.
+
+class Fichier:
+    def __init__(self, chemin, mode):
+        self.chemin = chemin
+        self.mode = mode
+
+    def __enter__(self):
+        self.fichier = open(self.chemin, self.mode)
+        return self.fichier
+
+    def __exit__(self, type_exc, valeur_exc, trace):
+        self.fichier.close()
+
+with open("donnees.txt", "r") as f:
+    contenu = f.read()
+
+La gestion des exceptions utilise try, except, else, finally.
+
+def lire_nombre(texte):
+    try:
+        valeur = int(texte)
+    except ValueError:
+        print("ce n'est pas un nombre valide")
+        return None
+    else:
+        return valeur
+    finally:
+        print("tentative de lecture terminee")
+
+Lever une exception personnalisee.
+
+class ErreurValidation(Exception):
+    pass
+
+def valider_age(age):
+    if age < 0:
+        raise ErreurValidation("l'age ne peut pas etre negatif")
+    return age
+
+Le module itertools fournit des outils pour construire des iterateurs efficaces.
+
+import itertools
+
+for combinaison in itertools.combinations([1, 2, 3], 2):
+    print(combinaison)
+
+for permutation in itertools.permutations([1, 2, 3]):
+    print(permutation)
+
+compteur_infini = itertools.count(start=0, step=1)
+
+Le module functools fournit des outils pour la programmation fonctionnelle.
+
+import functools
+
+@functools.lru_cache(maxsize=None)
+def fibonacci_rapide(n):
+    if n < 2:
+        return n
+    return fibonacci_rapide(n - 1) + fibonacci_rapide(n - 2)
+
+produit = functools.reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])
+
+Le module collections fournit des structures de donnees specialisees.
+
+from collections import Counter, defaultdict, namedtuple
+
+compteur = Counter(["a", "b", "a", "c", "b", "a"])
+groupes = defaultdict(list)
+groupes["fruits"].append("pomme")
+
+Point = namedtuple("Point", ["x", "y"])
+p = Point(1, 2)
+
+La programmation asynchrone utilise async et await.
+
+import asyncio
+
+async def recuperer_donnees(url):
+    await asyncio.sleep(1)
+    return "donnees de " + url
+
+async def principal():
+    resultats = await asyncio.gather(
+        recuperer_donnees("a"),
+        recuperer_donnees("b"),
+    )
+    print(resultats)
+
+Un algorithme de tri rapide (quicksort) recursif.
+
+def tri_rapide(tableau):
+    if len(tableau) <= 1:
+        return tableau
+    pivot = tableau[len(tableau) // 2]
+    gauche = [x for x in tableau if x < pivot]
+    milieu = [x for x in tableau if x == pivot]
+    droite = [x for x in tableau if x > pivot]
+    return tri_rapide(gauche) + milieu + tri_rapide(droite)
+
+Une recherche binaire dans un tableau trie.
+
+def recherche_binaire(tableau, cible):
+    gauche, droite = 0, len(tableau) - 1
+    while gauche <= droite:
+        milieu = (gauche + droite) // 2
+        if tableau[milieu] == cible:
+            return milieu
+        elif tableau[milieu] < cible:
+            gauche = milieu + 1
+        else:
+            droite = milieu - 1
+    return -1
+
+Une pile (stack) implementee avec une liste Python.
+
+class Pile:
+    def __init__(self):
+        self.elements = []
+
+    def empiler(self, valeur):
+        self.elements.append(valeur)
+
+    def depiler(self):
+        return self.elements.pop()
+
+    def est_vide(self):
+        return len(self.elements) == 0
+
+Une file (queue) implementee avec collections.deque.
+
+from collections import deque
+
+class File:
+    def __init__(self):
+        self.elements = deque()
+
+    def enfiler(self, valeur):
+        self.elements.append(valeur)
+
+    def defiler(self):
+        return self.elements.popleft()
+
+Un arbre binaire de recherche simple.
+
+class Noeud:
+    def __init__(self, valeur):
+        self.valeur = valeur
+        self.gauche = None
+        self.droite = None
+
+class ArbreBinaire:
+    def __init__(self):
+        self.racine = None
+
+    def inserer(self, valeur):
+        if self.racine is None:
+            self.racine = Noeud(valeur)
+        else:
+            self._inserer_recursif(self.racine, valeur)
+
+    def _inserer_recursif(self, noeud, valeur):
+        if valeur < noeud.valeur:
+            if noeud.gauche is None:
+                noeud.gauche = Noeud(valeur)
+            else:
+                self._inserer_recursif(noeud.gauche, valeur)
+        else:
+            if noeud.droite is None:
+                noeud.droite = Noeud(valeur)
+            else:
+                self._inserer_recursif(noeud.droite, valeur)
+
+Les expressions lambda creent des fonctions anonymes courtes.
+
+carre = lambda x: x * x
+addition = lambda a, b: a + b
+tri_par_longueur = sorted(["salut", "a", "bonjour"], key=lambda mot: len(mot))
+
+Les fonctions map, filter et sorted sont couramment utilisees ensemble.
+
+nombres = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+doubles = list(map(lambda n: n * 2, nombres))
+pairs = list(filter(lambda n: n % 2 == 0, nombres))
+tries = sorted(nombres, reverse=True)
+
+Le debogage utilise souvent des assertions.
+
+def racine_carree(x):
+    assert x >= 0, "x doit etre positif"
+    return x ** 0.5
+
+Les f-strings permettent d'interpoler des valeurs directement dans une chaine.
+
+nom = "Shion"
+version = 1
+message = f"{nom} version {version} est prete"
+resultat = f"{2 + 2 = }"
+
+Le module dataclasses simplifie l'ecriture de classes qui stockent des donnees.
+
+from dataclasses import dataclass
+
+@dataclass
+class Point3D:
+    x: float
+    y: float
+    z: float
+
+    def norme(self):
+        return (self.x ** 2 + self.y ** 2 + self.z ** 2) ** 0.5
+
+Les proprietes permettent de controler l'acces aux attributs d'une classe.
+
+class Temperature:
+    def __init__(self, celsius):
+        self._celsius = celsius
+
+    @property
+    def fahrenheit(self):
+        return self._celsius * 9 / 5 + 32
+
+    @fahrenheit.setter
+    def fahrenheit(self, valeur):
+        self._celsius = (valeur - 32) * 5 / 9
+
+Les methodes de classe et methodes statiques.
+
+class Cercle:
+    pi = 3.14159
+
+    def __init__(self, rayon):
+        self.rayon = rayon
+
+    @staticmethod
+    def depuis_diametre(diametre):
+        return Cercle(diametre / 2)
+
+    @classmethod
+    def unite(cls):
+        return cls(1)
+
+    def aire(self):
+        return Cercle.pi * self.rayon ** 2
+
+Bonnes pratiques Python : nommer les variables clairement, ecrire des fonctions courtes qui font une seule chose, preferer les comprehensions aux boucles quand c'est plus lisible, gerer les erreurs explicitement avec try/except, documenter les fonctions avec des docstrings, et tester le code avec des fonctions de test dediees.
+
+def test_addition():
+    assert addition(2, 3) == 5
+    assert addition(-1, 1) == 0
+    assert addition(0, 0) == 0
+
+Un exemple complet : une fonction qui compte les mots d'un texte.
+
+def compter_mots(texte):
+    mots = texte.lower().split()
+    compteur = {}
+    for mot in mots:
+        compteur[mot] = compteur.get(mot, 0) + 1
+    return compteur
+
+Un exemple complet : une classe qui represente une pile de cartes.
+
+class Carte:
+    def __init__(self, valeur, couleur):
+        self.valeur = valeur
+        self.couleur = couleur
+
+    def __repr__(self):
+        return str(self.valeur) + " de " + self.couleur
+
+class Jeu:
+    def __init__(self):
+        valeurs = range(1, 14)
+        couleurs = ["coeur", "carreau", "trefle", "pique"]
+        self.cartes = [Carte(v, c) for v in valeurs for c in couleurs]
+
+    def melanger(self):
+        import random
+        random.shuffle(self.cartes)
+
+    def piocher(self):
+        return self.cartes.pop()

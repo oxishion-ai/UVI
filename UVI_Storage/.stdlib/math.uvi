@@ -1,0 +1,12 @@
+PI = 3.14159265
+DEF CARRE(n) -> _retour = n * n
+DEF CUBE(n) -> _retour = n * n * n
+DEF ABS(n) -> _retour = n * (n >= 0) + (0 - n) * (n < 0)
+DEF MAX(a, b) -> _retour = a * (a >= b) + b * (b > a)
+DEF MIN(a, b) -> _retour = a * (a <= b) + b * (b < a)
+EXPORT PI
+EXPORT CARRE
+EXPORT CUBE
+EXPORT ABS
+EXPORT MAX
+EXPORT MIN

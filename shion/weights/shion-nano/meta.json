@@ -1,0 +1,13 @@
+{
+  "name": "shion-nano",
+  "vocab_size": 260,
+  "d_model": 96,
+  "n_layer": 3,
+  "n_head": 4,
+  "d_ff": 384,
+  "window": 80,
+  "max_seq_len": 768,
+  "rms_eps": 1e-05,
+  "quant_bits": 4,
+  "quant_group": 32
+}

@@ -1,0 +1,284 @@
+Q: Qu'est-ce qu'un decorateur en Python ?
+R: Un decorateur est une fonction qui prend une autre fonction en argument et retourne une fonction modifiee, souvent via la syntaxe @nom_decorateur.
+
+Q: Comment ecrire un decorateur simple ?
+R: def decorateur(fonc):\n    def wrapper(*args, **kwargs):\n        return fonc(*args, **kwargs)\n    return wrapper
+
+Q: A quoi sert functools.wraps ?
+R: functools.wraps preserve le nom et la docstring de la fonction originale quand on l'enveloppe dans un decorateur.
+
+Q: Qu'est-ce qu'une closure en Python ?
+R: Une closure est une fonction interne qui capture des variables de la portee englobante meme apres que cette portee soit terminee.
+
+Q: Comment fonctionne *args ?
+R: *args collecte les arguments positionnels supplementaires dans un tuple.
+
+Q: Comment fonctionne **kwargs ?
+R: **kwargs collecte les arguments nommes supplementaires dans un dictionnaire.
+
+Q: Qu'est-ce qu'une fonction lambda ?
+R: Une lambda est une fonction anonyme d'une seule expression, ecrite avec le mot-cle lambda.
+
+Q: Quand utiliser une lambda plutot qu'une fonction def ?
+R: Pour une petite fonction utilisee une seule fois, par exemple comme cle de tri.
+
+Q: A quoi sert functools.reduce ?
+R: reduce applique une fonction cumulative a une sequence pour la reduire a une seule valeur.
+
+Q: A quoi sert functools.partial ?
+R: partial fixe certains arguments d'une fonction pour creer une nouvelle fonction avec moins de parametres.
+
+Q: A quoi sert functools.lru_cache ?
+R: lru_cache met en cache les resultats d'une fonction pour eviter de recalculer les memes appels.
+
+Q: Qu'est-ce qu'un generateur en Python ?
+R: Un generateur est une fonction qui utilise yield pour produire une sequence de valeurs paresseusement, une a la fois.
+
+Q: Quelle est la difference entre return et yield ?
+R: return termine la fonction et renvoie une valeur, yield suspend la fonction et peut reprendre plus tard.
+
+Q: A quoi sert yield from ?
+R: yield from delegue l'iteration a un sous-generateur ou un iterable.
+
+Q: Qu'est-ce qu'une expression generatrice ?
+R: C'est une comprehension entre parentheses, comme (x*x for x in range(10)), qui produit les valeurs paresseusement.
+
+Q: Quelle est la difference entre une liste et un generateur ?
+R: Une liste garde toutes les valeurs en memoire, un generateur les produit une par une sans tout stocker.
+
+Q: Qu'est-ce que le module itertools ?
+R: itertools fournit des outils pour construire des iterateurs efficaces, comme chain, cycle, product et combinations.
+
+Q: A quoi sert itertools.chain ?
+R: chain enchaine plusieurs iterables en une seule sequence continue.
+
+Q: A quoi sert itertools.count ?
+R: count genere une sequence infinie de nombres a partir d'une valeur de depart.
+
+Q: Comment definir une classe en Python ?
+R: class NomClasse:\n    def __init__(self, valeur):\n        self.valeur = valeur
+
+Q: Quelle est la difference entre une methode et une methode de classe ?
+R: Une methode normale prend self, une methode de classe prend cls et est marquee @classmethod.
+
+Q: A quoi sert @staticmethod ?
+R: @staticmethod definit une methode qui n'a besoin ni de self ni de cls, comme une fonction rangee dans la classe.
+
+Q: Qu'est-ce qu'une property en Python ?
+R: Une property permet d'acceder a une methode comme si c'etait un attribut, via le decorateur @property.
+
+Q: Comment definir un setter avec property ?
+R: On definit une methode avec @property puis une autre avec @nom.setter pour permettre l'assignation.
+
+Q: Qu'est-ce que __init__ ?
+R: __init__ est la methode appelee automatiquement pour initialiser une nouvelle instance d'une classe.
+
+Q: Qu'est-ce que __repr__ ?
+R: __repr__ retourne une representation texte de l'objet, utile pour le debogage.
+
+Q: Quelle est la difference entre __repr__ et __str__ ?
+R: __repr__ vise les developpeurs et doit etre non ambigu, __str__ vise l'affichage lisible pour l'utilisateur.
+
+Q: Qu'est-ce que __eq__ ?
+R: __eq__ definit le comportement de l'operateur == pour les instances de la classe.
+
+Q: Qu'est-ce que __len__ ?
+R: __len__ permet a un objet de repondre a la fonction len().
+
+Q: Qu'est-ce que __iter__ ?
+R: __iter__ permet a un objet d'etre utilise dans une boucle for, en retournant un iterateur.
+
+Q: Qu'est-ce qu'un context manager ?
+R: Un context manager gere l'entree et la sortie d'un bloc with, via les methodes __enter__ et __exit__.
+
+Q: Comment ecrire un context manager avec un decorateur ?
+R: On utilise @contextlib.contextmanager sur une fonction generateur avec un seul yield.
+
+Q: Qu'est-ce qu'une dataclass ?
+R: Une dataclass est une classe generee avec @dataclass qui cree automatiquement __init__ et __repr__ a partir des attributs.
+
+Q: Qu'est-ce que l'heritage multiple en Python ?
+R: Une classe peut heriter de plusieurs classes parentes, Python resout l'ordre via le MRO, method resolution order.
+
+Q: Qu'est-ce qu'une classe abstraite ?
+R: Une classe abstraite, via le module abc, definit des methodes que les sous-classes doivent implementer.
+
+Q: Comment gerer une exception en Python ?
+R: try:\n    code()\nexcept Exception as e:\n    gerer(e)
+
+Q: Quelle est l'utilite de finally ?
+R: finally execute du code apres try et except, que l'exception ait eu lieu ou non.
+
+Q: Quelle est l'utilite de else dans un try ?
+R: else s'execute seulement si aucune exception n'a ete levee dans le bloc try.
+
+Q: Comment definir une exception personnalisee ?
+R: class MonErreur(Exception):\n    pass
+
+Q: Qu'est-ce que raise ... from ... ?
+R: raise ... from ... chaine une nouvelle exception a l'exception d'origine pour garder le contexte.
+
+Q: Qu'est-ce que les annotations de type en Python ?
+R: Les annotations de type indiquent le type attendu, comme def f(x: int) -> str, sans etre verifiees a l'execution.
+
+Q: A quoi sert le module typing ?
+R: typing fournit des types comme List, Dict, Optional et Union pour annoter du code plus precisement.
+
+Q: Que signifie Optional[int] ?
+R: Optional[int] signifie que la valeur peut etre un int ou None.
+
+Q: Qu'est-ce qu'une comprehension de liste ?
+R: [x*x for x in range(10)] construit une nouvelle liste en une seule expression.
+
+Q: Qu'est-ce qu'une comprehension de dictionnaire ?
+R: {k: v for k, v in paires} construit un dictionnaire en une seule expression.
+
+Q: Qu'est-ce que l'operateur walrus ?
+R: L'operateur := assigne une valeur a une variable a l'interieur d'une expression, par exemple dans une condition.
+
+Q: Comment deballer une liste en Python ?
+R: a, b, *reste = [1, 2, 3, 4] assigne a=1, b=2 et reste=[3, 4].
+
+Q: Qu'est-ce que collections.Counter ?
+R: Counter compte les occurrences des elements d'un iterable et retourne un dictionnaire de comptes.
+
+Q: Qu'est-ce que collections.defaultdict ?
+R: defaultdict cree automatiquement une valeur par defaut pour une cle absente au lieu de lever une erreur.
+
+Q: Qu'est-ce que collections.namedtuple ?
+R: namedtuple cree une classe legere de tuple avec des champs nommes accessibles par attribut.
+
+Q: Qu'est-ce que collections.deque ?
+R: deque est une file double, efficace pour ajouter ou retirer des elements aux deux extremites.
+
+Q: Quelle est la difference entre une liste et un tuple ?
+R: Une liste est modifiable, un tuple est immuable une fois cree.
+
+Q: Pourquoi eviter les arguments par defaut mutables ?
+R: Un argument par defaut mutable comme une liste est cree une seule fois et partage entre tous les appels, causant des bugs.
+
+Q: Qu'est-ce que __slots__ ?
+R: __slots__ limite les attributs possibles d'une classe et reduit la memoire utilisee par instance.
+
+Q: Qu'est-ce que le GIL en Python ?
+R: Le GIL, global interpreter lock, empeche plusieurs threads Python d'executer du bytecode en meme temps dans un seul processus.
+
+Q: Quand utiliser multiprocessing plutot que threading ?
+R: multiprocessing pour du calcul intensif CPU, threading pour des taches limitees par les entrees-sorties.
+
+Q: Qu'est-ce que asyncio ?
+R: asyncio permet d'ecrire du code asynchrone avec async et await pour gerer plusieurs taches concurrentes sans threads.
+
+Q: Que fait le mot-cle async def ?
+R: async def definit une coroutine, une fonction qui peut etre suspendue avec await.
+
+Q: Que fait await ?
+R: await suspend une coroutine jusqu'a ce que la tache attendue soit terminee.
+
+Q: Quelle est la difference entre EAFP et LBYL ?
+R: EAFP, easier to ask forgiveness than permission, essaie puis attrape l'erreur ; LBYL verifie les conditions avant d'agir.
+
+Q: Comment ouvrir un fichier de maniere sure en Python ?
+R: with open('fichier.txt') as f:\n    contenu = f.read()
+
+Q: Pourquoi utiliser with pour les fichiers ?
+R: with garantit que le fichier est ferme automatiquement, meme en cas d'erreur.
+
+Q: Qu'est-ce qu'un module en Python ?
+R: Un module est un fichier .py qui peut etre importe pour reutiliser ses fonctions et classes.
+
+Q: Qu'est-ce qu'un package en Python ?
+R: Un package est un dossier contenant des modules et un fichier __init__.py.
+
+Q: Comment ecrire un test unitaire simple ?
+R: import unittest\nclass TestExemple(unittest.TestCase):\n    def test_addition(self):\n        self.assertEqual(1 + 1, 2)
+
+Q: Qu'est-ce que pytest ?
+R: pytest est un framework de test qui simplifie l'ecriture de tests avec de simples fonctions et assert.
+
+Q: Comment mesurer le temps d'execution d'un code Python ?
+R: import time\ndebut = time.time()\ncode()\nprint(time.time() - debut)
+
+Q: Qu'est-ce qu'une variable globale en Python ?
+R: Une variable globale est definie hors de toute fonction et accessible partout, modifiable dans une fonction avec le mot-cle global.
+
+Q: A quoi sert le mot-cle nonlocal ?
+R: nonlocal permet de modifier une variable d'une portee englobante, dans une fonction imbriquee.
+
+Q: Qu'est-ce qu'un iterateur en Python ?
+R: Un iterateur est un objet avec une methode __next__ qui produit la valeur suivante d'une sequence.
+
+Q: Quelle est la difference entre iterable et iterateur ?
+R: Un iterable peut produire un iterateur via __iter__, un iterateur produit les valeurs une par une via __next__.
+
+Q: Comment trier une liste en Python ?
+R: liste.sort() trie en place, sorted(liste) retourne une nouvelle liste triee.
+
+Q: Comment trier avec une cle personnalisee ?
+R: sorted(liste, key=lambda x: x.valeur) trie selon la valeur retournee par la fonction cle.
+
+Q: Qu'est-ce que le slicing en Python ?
+R: Le slicing extrait une sous-partie d'une sequence, par exemple liste[1:3] ou chaine[::-1] pour inverser.
+
+Q: Comment inverser une chaine en Python ?
+R: chaine[::-1] inverse la chaine grace au slicing avec un pas de moins un.
+
+Q: Qu'est-ce qu'un f-string ?
+R: Un f-string, comme f"valeur = {x}", insere directement des expressions Python dans une chaine.
+
+Q: Comment concatener des chaines efficacement ?
+R: Utiliser "".join(liste) est plus efficace que d'additionner des chaines dans une boucle.
+
+Q: Qu'est-ce qu'un environnement virtuel Python ?
+R: Un environnement virtuel isole les dependances d'un projet, cree avec python -m venv nom_env.
+
+Q: A quoi sert pip ?
+R: pip installe et gere les paquets Python depuis PyPI.
+
+Q: Qu'est-ce qu'un dictionnaire en Python ?
+R: Un dictionnaire associe des cles uniques a des valeurs, avec un acces rapide par cle.
+
+Q: Comment parcourir un dictionnaire ?
+R: for cle, valeur in dictionnaire.items(): traite chaque paire cle-valeur.
+
+Q: Qu'est-ce qu'un set en Python ?
+R: Un set est une collection non ordonnee d'elements uniques, utile pour les tests d'appartenance rapides.
+
+Q: Comment fusionner deux dictionnaires ?
+R: nouveau = dict1 | dict2 fusionne deux dictionnaires, dict2 ecrasant les cles communes.
+
+Q: Qu'est-ce que le duck typing en Python ?
+R: Le duck typing juge un objet par son comportement plutot que par son type declare : si ca marche comme un canard, c'est un canard.
+
+Q: Qu'est-ce qu'une metaclass en Python ?
+R: Une metaclass est la classe d'une classe, elle controle comment les classes elles-memes sont creees.
+
+Q: Comment verifier le type d'un objet ?
+R: isinstance(objet, TypeAttendu) verifie si un objet est d'un type donne, y compris les sous-classes.
+
+Q: Quelle est la difference entre is et == ?
+R: is compare l'identite des objets en memoire, == compare l'egalite des valeurs.
+
+Q: Qu'est-ce qu'un module __main__ ?
+R: if __name__ == "__main__": permet d'executer du code seulement quand le fichier est lance directement, pas importe.
+
+Q: Comment lever une exception avec un message ?
+R: raise ValueError("message d'erreur explicite")
+
+Q: Qu'est-ce qu'un walrus dans une boucle while ?
+R: while (ligne := fichier.readline()): permet de lire et tester une valeur en une seule expression.
+
+Q: Comment creer une classe immuable en Python ?
+R: Utiliser @dataclass(frozen=True) empeche la modification des attributs apres creation.
+
+Q: Qu'est-ce que le polymorphisme en Python ?
+R: Le polymorphisme permet a des objets de classes differentes de repondre a la meme methode de facon differente.
+
+Q: Qu'est-ce que l'encapsulation en Python ?
+R: L'encapsulation cache les details internes d'une classe, souvent en prefixant les attributs par un underscore.
+
+Q: Que signifie un underscore devant un attribut, comme _valeur ?
+R: Un underscore indique par convention que l'attribut est prive, meme si Python ne l'empeche pas techniquement.
+
+Q: Que signifie un double underscore devant un attribut ?
+R: Un double underscore declenche le name mangling, qui rend l'attribut plus difficile a acceder depuis l'exterieur.

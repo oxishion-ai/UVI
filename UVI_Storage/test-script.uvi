@@ -1,0 +1,5 @@
+@UVI
+!"salut quel est ton nom et ton âge ?"
+?nom
+?E.âge
+!"ton nom est {nom} et tu as {âge} ans, bienvenue!"
