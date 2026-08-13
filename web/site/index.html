@@ -1,0 +1,703 @@
+<title>UVI — Universe · Vision · Intelligence</title>
+<style>
+/* ============================================================
+   TOKENS
+   Palette dérivée directement du logo UVI (trois arcs orbitaux
+   Univers/bleu, Vision/cyan, Intelligence/violet, autour d'un
+   noyau) -- système déjà existant, pas réinventé ici.
+   ============================================================ */
+:root {
+  --bg: #F5F7FC;
+  --bg-raised: #FFFFFF;
+  --bg-sunken: #EBEFF8;
+  --border: #DCE3F2;
+  --text: #0B1220;
+  --text-muted: #565F78;
+  --text-faint: #8A93AC;
+  --blue: #2563EB;
+  --cyan: #0891B2;
+  --purple: #9333EA;
+  --code-bg: #0B1220;
+  --code-text: #DCE6FF;
+  --font-display: ui-monospace, "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, monospace;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --shadow: 0 1px 2px rgba(20,30,60,0.04), 0 8px 24px rgba(20,30,60,0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #060B18;
+    --bg-raised: #0D1526;
+    --bg-sunken: #0A101F;
+    --border: #202B47;
+    --text: #EAF2FF;
+    --text-muted: #97A2C0;
+    --text-faint: #6B7594;
+    --blue: #3B82F6;
+    --cyan: #22D3EE;
+    --purple: #A855F7;
+    --code-bg: #060B18;
+    --code-text: #D7E4FF;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px rgba(0,0,0,0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #060B18;
+  --bg-raised: #0D1526;
+  --bg-sunken: #0A101F;
+  --border: #202B47;
+  --text: #EAF2FF;
+  --text-muted: #97A2C0;
+  --text-faint: #6B7594;
+  --blue: #3B82F6;
+  --cyan: #22D3EE;
+  --purple: #A855F7;
+  --code-bg: #060B18;
+  --code-text: #D7E4FF;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px rgba(0,0,0,0.35);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.55;
+}
+h1, h2, h3, h4 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+img, svg, canvas { display: block; max-width: 100%; }
+.container { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+section { position: relative; }
+
+/* eyebrow label */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  display: flex; align-items: center; gap: 9px;
+}
+.eyebrow::before {
+  content: ""; width: 22px; height: 1px; background: var(--cyan); opacity: 0.6;
+}
+
+/* ============================================================
+   NAV
+   ============================================================ */
+.nav {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-row {
+  display: flex; align-items: center; gap: 20px;
+  padding: 14px 0;
+}
+.nav-brand { display: flex; align-items: center; gap: 9px; font-family: var(--font-display); font-weight: 700; font-size: 15px; margin-right: auto; }
+.nav-brand canvas { width: 26px; height: 26px; }
+.nav-links { display: flex; align-items: center; gap: 26px; font-size: 13.5px; color: var(--text-muted); }
+.nav-links a:hover { color: var(--text); }
+.nav-cta {
+  font-family: var(--font-display); font-size: 12.5px; font-weight: 600;
+  padding: 8px 15px; border-radius: 8px;
+  background: var(--text); color: var(--bg);
+  white-space: nowrap;
+}
+.theme-toggle {
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+  width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.auth-area { display: flex; align-items: center; gap: 10px; }
+.auth-area button.nav-cta { border: none; }
+@media (max-width: 720px) { .nav-links { display: none; } }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero {
+  padding: 88px 0 72px;
+  text-align: center;
+  overflow: hidden;
+}
+.hero-orb { width: 200px; height: 200px; margin: 0 auto 28px; }
+.hero h1 {
+  font-size: clamp(34px, 6vw, 58px);
+  letter-spacing: -0.01em;
+  line-height: 1.06;
+}
+.hero .grad {
+  background: linear-gradient(95deg, var(--blue), var(--cyan) 55%, var(--purple));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero-sub {
+  max-width: 620px; margin: 22px auto 0;
+  font-size: 17px; color: var(--text-muted); line-height: 1.6;
+}
+.hero-ctas { display: flex; gap: 12px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
+.btn {
+  font-family: var(--font-display); font-size: 13.5px; font-weight: 600;
+  padding: 13px 22px; border-radius: 10px; cursor: pointer; border: 1px solid transparent;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.btn-primary { background: var(--text); color: var(--bg); }
+.btn-secondary { background: transparent; border-color: var(--border); color: var(--text); }
+.btn:hover { opacity: 0.88; }
+.hero-meta {
+  margin-top: 20px; font-family: var(--font-display); font-size: 11.5px;
+  color: var(--text-faint); letter-spacing: 0.04em;
+}
+
+/* ============================================================
+   SHARED SECTION HEADERS
+   ============================================================ */
+.section { padding: 76px 0; border-top: 1px solid var(--border); }
+.section-head { max-width: 620px; margin-bottom: 44px; }
+.section-head h2 { font-size: clamp(24px, 3.4vw, 32px); margin-top: 12px; }
+.section-head p { color: var(--text-muted); margin-top: 12px; font-size: 15.5px; }
+
+/* ============================================================
+   FEATURES GRID
+   ============================================================ */
+.grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1px;
+  background: var(--border); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+}
+.card { background: var(--bg-raised); padding: 26px 24px; }
+.card .glyph {
+  width: 34px; height: 34px; border-radius: 9px; margin-bottom: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; color: var(--bg-raised);
+}
+.card h3 { font-size: 14.5px; margin-bottom: 8px; }
+.card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.55; }
+.card .price { font-family: var(--font-display); font-size: 26px; margin-top: 4px; }
+.card .price span { font-size: 13px; color: var(--text-faint); font-weight: 400; }
+.card ul { list-style: none; margin: 14px 0 20px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.card li { font-size: 13.5px; color: var(--text-muted); }
+.card li.no { color: var(--text-faint); }
+
+/* ============================================================
+   CODE SHOWCASE
+   ============================================================ */
+.code-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.code-tab {
+  font-family: var(--font-display); font-size: 12px; padding: 8px 14px; border-radius: 8px;
+  background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+}
+.code-tab[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.code-panel { display: none; }
+.code-panel.active { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--border); }
+@media (max-width: 760px) { .code-panel.active { grid-template-columns: 1fr; } }
+.code-block {
+  background: var(--code-bg); color: var(--code-text);
+  font-family: var(--font-display); font-size: 13px; line-height: 1.7;
+  padding: 22px 22px; overflow-x: auto; white-space: pre;
+}
+.code-block .ln { color: var(--text-faint); display: inline-block; width: 1.6em; user-select: none; }
+.code-out {
+  background: var(--bg-sunken); padding: 22px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.code-out .lbl { font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.1em; color: var(--text-faint); text-transform: uppercase; }
+.code-out .term {
+  font-family: var(--font-display); font-size: 13px; color: var(--cyan); line-height: 1.7;
+}
+.code-out .cap { font-size: 13px; color: var(--text-muted); margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+
+/* ============================================================
+   DOMAINS
+   ============================================================ */
+.domains { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.domain-row {
+  display: grid; grid-template-columns: 210px 1fr; gap: 24px;
+  padding: 22px 26px; border-top: 1px solid var(--border);
+  align-items: baseline;
+}
+.domain-row:first-child { border-top: none; }
+.domain-row:hover { background: var(--bg-raised); }
+.domain-row h3 { font-size: 14.5px; }
+.domain-row p { font-size: 13.5px; color: var(--text-muted); }
+@media (max-width: 640px) { .domain-row { grid-template-columns: 1fr; gap: 6px; } }
+
+/* ============================================================
+   SHION
+   ============================================================ */
+.shion-section {
+  background: var(--bg-sunken);
+}
+.shion-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+@media (max-width: 820px) { .shion-layout { grid-template-columns: 1fr; } }
+.shion-orb-wrap { display: flex; align-items: center; justify-content: center; }
+.shion-orb-wrap canvas { width: 220px; height: 220px; }
+.shion-facts { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.shion-facts li { display: flex; gap: 10px; font-size: 14px; color: var(--text-muted); }
+.shion-facts b { color: var(--text); font-family: var(--font-display); font-size: 12.5px; min-width: 108px; flex-shrink: 0; }
+
+/* ============================================================
+   DOWNLOAD
+   ============================================================ */
+.download-panel {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--border); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+}
+@media (max-width: 760px) { .download-panel { grid-template-columns: 1fr; } }
+.dl-card { background: var(--bg-raised); padding: 30px 28px; display: flex; flex-direction: column; gap: 14px; }
+.dl-card h3 { font-size: 16px; }
+.dl-card p { font-size: 13.5px; color: var(--text-muted); }
+.dl-card .req { font-family: var(--font-display); font-size: 11px; color: var(--text-faint); letter-spacing: 0.03em; }
+.dl-card .btn { align-self: flex-start; margin-top: 4px; }
+.snippet {
+  background: var(--code-bg); color: var(--code-text); font-family: var(--font-display);
+  font-size: 12.5px; padding: 12px 14px; border-radius: 8px; overflow-x: auto; white-space: pre;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+footer { border-top: 1px solid var(--border); padding: 40px 0; }
+.footer-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.footer-row .fmuted { font-size: 12.5px; color: var(--text-faint); font-family: var(--font-display); }
+.footer-links { display: flex; gap: 20px; font-size: 13px; color: var(--text-muted); }
+</style>
+
+<nav class="nav">
+  <div class="container nav-row">
+    <div class="nav-brand"><canvas id="nav-orb" width="52" height="52"></canvas>UVI</div>
+    <div class="nav-links">
+      <a href="#langage">Langage</a>
+      <a href="#shion">Shion</a>
+      <a href="#domaines">Domaines</a>
+      <a href="#tarifs">Tarifs</a>
+      <a href="#telecharger">Télécharger</a>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Changer de thème">◐</button>
+    <div class="auth-area" id="auth-area">
+      <button class="nav-cta" id="btn-login" type="button">Se connecter avec Google</button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <canvas class="hero-orb" id="hero-orb" width="400" height="400"></canvas>
+    <h1><span class="grad">UVI</span><br>Universe · Vision · Intelligence</h1>
+    <p class="hero-sub">Un langage de programmation pensé pour apprendre vite, un IDE complet avec deux moteurs d'exécution qui se vérifient l'un l'autre, et Shion — une IA qui comprend la vraie syntaxe et le vrai arbre de ton code, pas une supposition.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="#telecharger">↓ Télécharger UVI</a>
+      <a class="btn btn-secondary" href="#telecharger">Essayer Shion Mobile →</a>
+    </div>
+    <p class="hero-meta">GRATUIT · TOURNE EN LOCAL</p>
+  </div>
+</header>
+
+<section class="section" id="langage">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Le langage</span>
+      <h2>Une syntaxe courte, un moteur qui ne triche pas</h2>
+      <p>Chaque symbole d'UVI a un seul sens, appris en une phrase. Deux moteurs d'exécution — un interpréteur qui lit l'arbre de syntaxe directement, une machine virtuelle qui compile en bytecode — tournent en parallèle sur la même suite de tests pour garantir qu'ils rendent toujours le même résultat.</p>
+    </div>
+
+    <div class="code-tabs" role="tablist" id="code-tabs">
+      <button class="code-tab" role="tab" aria-selected="true" data-tab="0">boucle.uvi</button>
+      <button class="code-tab" role="tab" aria-selected="false" data-tab="1">fonction.uvi</button>
+      <button class="code-tab" role="tab" aria-selected="false" data-tab="2">tableau.uvi</button>
+      <button class="code-tab" role="tab" aria-selected="false" data-tab="3">stop.uvi</button>
+    </div>
+
+    <div class="code-panel active" data-panel="0">
+      <div class="code-block">! "Bonjour, UVI !"
+% 3 -&gt; ! "Itération"</div>
+      <div class="code-out">
+        <span class="lbl">Sortie</span>
+        <div class="term">Bonjour, UVI !
+Itération
+Itération
+Itération</div>
+        <p class="cap"><code>%</code> répète un bloc N fois — pas de parenthèses, pas de deux-points, une flèche.</p>
+      </div>
+    </div>
+    <div class="code-panel" data-panel="1">
+      <div class="code-block">DEF carre(n) -&gt; _retour = n * n
+CALL carre(7) -&gt; resultat
+~ resultat &gt; 40 -&gt; ! "Grand carré" || ! "Petit carré"</div>
+      <div class="code-out">
+        <span class="lbl">Sortie</span>
+        <div class="term">Grand carré</div>
+        <p class="cap">Une fonction, un appel avec destination, un IF/ELSE en une ligne (<code>~ ... -&gt; ... || ...</code>).</p>
+      </div>
+    </div>
+    <div class="code-panel" data-panel="2">
+      <div class="code-block">TAB scores
+TAB.PUSH scores -&gt; 92
+TAB.PUSH scores -&gt; 78
+TAB.LEN scores -&gt; n
+! n</div>
+      <div class="code-out">
+        <span class="lbl">Sortie</span>
+        <div class="term">2</div>
+        <p class="cap">Tableaux dynamiques intégrés au langage, pas une bibliothèque à importer.</p>
+      </div>
+    </div>
+    <div class="code-panel" data-panel="3">
+      <div class="code-block">i = 0
+%% i &lt; 100 -&gt; ~ i == 5 -&gt; @STOP || ! i | i = i + 1</div>
+      <div class="code-out">
+        <span class="lbl">Sortie</span>
+        <div class="term">0
+1
+2
+3
+4</div>
+        <p class="cap"><code>@STOP</code> arrête tout le programme immédiatement, depuis n'importe quel niveau d'imbrication.</p>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:56px;">
+      <div class="card">
+        <div class="glyph" style="background:var(--blue)">⚙</div>
+        <h3>Deux moteurs, un seul résultat</h3>
+        <p>Interpréteur d'arbre ET machine virtuelle bytecode, vérifiés l'un contre l'autre par une suite de tests dédiée — un écart entre les deux est traité comme un bug, jamais toléré.</p>
+      </div>
+      <div class="card">
+        <div class="glyph" style="background:var(--cyan)">◆</div>
+        <h3>Bac à sable réel</h3>
+        <p>Le stockage de fichiers d'un script est confiné par construction — aucun chemin ne peut s'échapper vers le reste du disque, même volontairement.</p>
+      </div>
+      <div class="card">
+        <div class="glyph" style="background:var(--purple)">↻</div>
+        <h3>S'auto-corrige</h3>
+        <p>Un script qui plante peut être diagnostiqué et réparé par l'assistant intégré ; <code>!LEARN</code> permet aussi d'enseigner une correction directement depuis le terminal.</p>
+      </div>
+      <div class="card">
+        <div class="glyph" style="background:var(--blue)">▦</div>
+        <h3>Dessine, joue, écoute le clavier</h3>
+        <p><code>DRAW.*</code> pour un canevas graphique, <code>KEY.*</code> pour lire le clavier en direct — de quoi prototyper un petit jeu sans quitter le langage.</p>
+      </div>
+      <div class="card">
+        <div class="glyph" style="background:var(--cyan)">▤</div>
+        <h3>Modulaire</h3>
+        <p><code>MODULE</code>/<code>EXPORT</code> pour des espaces de noms isolés, <code>IMPORT</code> pour de l'inclusion directe, un registre de paquets pour partager du code UVI.</p>
+      </div>
+      <div class="card">
+        <div class="glyph" style="background:var(--purple)">🌐</div>
+        <h3>5 langues, une interface</h3>
+        <p>L'IDE lui-même se parle en anglais, français, espagnol, mandarin ou hindi — changement instantané, sans redémarrage.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section shion-section" id="shion">
+  <div class="container">
+    <div class="shion-layout">
+      <div>
+        <span class="eyebrow">L'assistant intégré</span>
+        <h2 style="font-size:clamp(24px,3.4vw,32px); margin-top:12px;">Shion lit ton code, pas une supposition</h2>
+        <p style="color:var(--text-muted); margin-top:14px; font-size:15px; line-height:1.6;">Quand on te demande d'expliquer, d'optimiser ou de déboguer un script, Shion ne devine pas la syntaxe par analogie avec Python — l'IDE lui donne la vraie grammaire d'UVI et l'arbre de syntaxe réel produit par le compilateur. Et tout peut tourner en local : Shion est une petite famille de modèles maison, entraînés et exécutés sans dépendre d'un service externe.</p>
+        <ul class="shion-facts">
+          <li><b>Zéro-dépendance</b> pas de framework de deep learning — juste NumPy et des maths écrites à la main, vérifiées par différences finies</li>
+          <li><b>Tokenizer octet</b> aucun vocabulaire à télécharger, n'importe quel texte UTF-8 fonctionne dès le premier octet</li>
+          <li><b>Mémoire bornée</b> les couches sont chargées et déchargées à la demande — la RAM utilisée ne dépend jamais de la longueur de la conversation</li>
+          <li><b>Sur mobile aussi</b> Shion Mobile fait tourner DeepSeek-R1-Distill-Qwen-1.5B directement dans le navigateur du téléphone via WebGPU, sans serveur</li>
+        </ul>
+        <div class="hero-ctas" style="justify-content:flex-start; margin-top:26px;">
+          <a class="btn btn-primary" href="#telecharger">Essayer Shion Mobile →</a>
+        </div>
+      </div>
+      <div class="shion-orb-wrap"><canvas id="shion-orb" width="440" height="440"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="domaines">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Où UVI excelle</span>
+      <h2>Un même langage, plusieurs terrains</h2>
+    </div>
+    <div class="domains">
+      <div class="domain-row">
+        <h3>Apprentissage</h3>
+        <p>Une grammaire volontairement petite (une poignée de symboles, pas de mots-clés à mémoriser par dizaines) et un assistant qui explique chaque ligne avec le vrai arbre de syntaxe sous les yeux.</p>
+      </div>
+      <div class="domain-row">
+        <h3>Prototypage de jeux</h3>
+        <p><code>DRAW.*</code> et <code>KEY.*</code> intégrés au langage — un canevas, des sprites, une boucle de jeu, sans bibliothèque externe à installer.</p>
+      </div>
+      <div class="domain-row">
+        <h3>Scripts &amp; automatisation</h3>
+        <p>Tableaux, chaînes, fichiers, tout ce qu'il faut pour un petit outil du quotidien — avec des limites de ressources qui empêchent une boucle infinie de figer la machine.</p>
+      </div>
+      <div class="domain-row">
+        <h3>Recherche sur les petits modèles locaux</h3>
+        <p>Shion est un pipeline complet — tokenizer, attention, quantification, service HTTP — écrit pour être lu et modifié, pas juste appelé comme boîte noire.</p>
+      </div>
+      <div class="domain-row">
+        <h3>Accessibilité linguistique</h3>
+        <p>Interface en anglais, français, espagnol, mandarin ou hindi ; le langage lui-même reste identique partout, seule l'habillage change.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="tarifs">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Tarifs</span>
+      <h2>Un IDE gratuit, Shion en option</h2>
+      <p>UVI — le langage, l'IDE, le canevas, le débogueur — est gratuit sans limite. Shion, l'assistant IA, est réservé aux abonnements.</p>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Gratuit</h3>
+        <p class="price">0 €<span>/mois</span></p>
+        <ul>
+          <li>✓ IDE complet (éditeur, canevas, débogueur)</li>
+          <li>✓ Langage UVI sans limite</li>
+          <li class="no">✗ Shion-flash</li>
+          <li class="no">✗ Shion</li>
+        </ul>
+        <span class="btn btn-secondary" id="tier-free" data-tier="free">Niveau actuel</span>
+      </div>
+      <div class="card">
+        <h3>UVI Pro</h3>
+        <p class="price">9,99 €<span>/mois</span></p>
+        <ul>
+          <li>✓ IDE complet</li>
+          <li>✓ Shion-flash (DeepSeek-R1 1,5B, local)</li>
+          <li class="no">✗ Shion complet</li>
+        </ul>
+        <a class="btn btn-primary" id="upgrade-pro" href="#tarifs" data-tier="pro">Passer à Pro</a>
+      </div>
+      <div class="card">
+        <h3>UVI Plus</h3>
+        <p class="price">19,99 €<span>/mois</span></p>
+        <ul>
+          <li>✓ IDE complet</li>
+          <li>✓ Shion-flash</li>
+          <li>✓ Shion complet (DeepSeek-R1 7B, local)</li>
+        </ul>
+        <a class="btn btn-primary" id="upgrade-plus" href="#tarifs" data-tier="plus">Passer à Plus</a>
+      </div>
+    </div>
+    <p class="req" style="margin-top:18px;">Connexion Google requise pour souscrire — voir le bouton en haut de page.</p>
+  </div>
+</section>
+
+<section class="section" id="telecharger">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Commencer</span>
+      <h2>Deux façons d'essayer UVI</h2>
+    </div>
+    <div class="download-panel">
+      <div class="dl-card">
+        <h3>UVI — l'atelier complet</h3>
+        <p>L'IDE de bureau (éditeur, canevas, débogueur, Shion intégré) tourne sur Windows/macOS/Linux.</p>
+        <p class="req">REQUIERT PYTHON 3.10+ · TKINTER (INCLUS AVEC PYTHON)</p>
+        <!-- TODO: pointer vers l'installateur une fois l'empaquetage (phase 4) livré -->
+        <a class="btn btn-primary" href="#telecharger">↓ Téléchargement bientôt disponible</a>
+      </div>
+      <div class="dl-card">
+        <h3>Shion Mobile</h3>
+        <p>Une conversation avec DeepSeek-R1-Distill-Qwen-1.5B directement dans ton navigateur mobile, via WebGPU ; se lance sur Android et iOS.</p>
+        <p class="req">~1,4 GO AU PREMIER LANCEMENT · REQUIERT WEBGPU (CHROME/EDGE RÉCENTS SUR ANDROID, SAFARI 26+ SUR IOS)</p>
+        <!-- TODO: pointer vers l'URL Netlify du site Shion Mobile une fois déployé -->
+        <a class="btn btn-primary" href="#telecharger">↓ Essayer bientôt disponible</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container footer-row">
+    <span class="fmuted">UVI — UNIVERSE · VISION · INTELLIGENCE</span>
+    <div class="footer-links">
+      <a href="#langage">Langage</a>
+      <a href="#shion">Shion</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  function drawOrb(canvas, t, size) {
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const targetW = size * dpr;
+    if (canvas.width !== targetW) {
+      canvas.width = targetW; canvas.height = targetW;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    }
+    ctx.clearRect(0, 0, size, size);
+    const cx = size / 2, cy = size / 2;
+    const r = size * 0.34;
+    const lw = size * 0.1;
+    const arcs = [
+      { color: "#3B82F6", start: -1.55 + t * 0.22 },
+      { color: "#22D3EE", start: 1.15 + t * 0.22 },
+      { color: "#A855F7", start: -0.35 + t * 0.22 },
+    ];
+    ctx.lineCap = "round";
+    arcs.forEach((a) => {
+      ctx.beginPath();
+      ctx.strokeStyle = a.color;
+      ctx.lineWidth = lw;
+      ctx.arc(cx, cy, r, a.start, a.start + 1.8);
+      ctx.stroke();
+    });
+    const pulse = 0.86 + Math.sin(t * 1.6) * 0.05;
+    ctx.beginPath();
+    ctx.fillStyle = "#22D3EE";
+    ctx.arc(cx, cy, r * 0.48 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.arc(cx - r * 0.15, cy - r * 0.15, r * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const canvases = ["hero-orb", "nav-orb", "shion-orb"].map((id) => document.getElementById(id)).filter(Boolean);
+  const t0 = performance.now();
+  function tick() {
+    const t = reduceMotion ? 0 : (performance.now() - t0) / 1000;
+    canvases.forEach((c) => drawOrb(c, t, c.id === "nav-orb" ? 26 : c.id === "shion-orb" ? 220 : 200));
+    if (!reduceMotion) requestAnimationFrame(tick);
+  }
+  tick();
+
+  // Onglets de code
+  const tabs = document.querySelectorAll(".code-tab");
+  const panels = document.querySelectorAll(".code-panel");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.forEach((t) => t.setAttribute("aria-selected", "false"));
+      panels.forEach((p) => p.classList.remove("active"));
+      tab.setAttribute("aria-selected", "true");
+      document.querySelector('.code-panel[data-panel="' + tab.dataset.tab + '"]').classList.add("active");
+    });
+  });
+
+  // Thème clair/sombre manuel
+  const root = document.documentElement;
+  const toggle = document.getElementById("theme-toggle");
+  toggle.addEventListener("click", () => {
+    const current = root.getAttribute("data-theme");
+    if (current === "dark") { root.setAttribute("data-theme", "light"); }
+    else if (current === "light") { root.removeAttribute("data-theme"); }
+    else { root.setAttribute("data-theme", "dark"); }
+  });
+})();
+</script>
+
+<script type="module">
+// Connexion Google (Supabase Auth) + niveau d'abonnement + liens Stripe.
+// Mise en place complète : voir docs/COMPTES_ABONNEMENTS.md.
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// TODO : remplir ces 4 valeurs une fois docs/COMPTES_ABONNEMENTS.md suivi
+// (§1 pour les deux premières, §6 pour les liens de paiement). La clé
+// "anon" est prévue pour être publique côté client — la sécurité vient des
+// règles RLS de supabase/schema.sql, pas du secret de cette clé.
+const SUPABASE_URL = "https://VOTRE-PROJET.supabase.co";
+const SUPABASE_ANON_KEY = "VOTRE_CLE_ANON_PUBLIQUE";
+const STRIPE_PAYMENT_LINK_PRO = "https://buy.stripe.com/VOTRE_LIEN_PRO";
+const STRIPE_PAYMENT_LINK_PLUS = "https://buy.stripe.com/VOTRE_LIEN_PLUS";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const authArea = document.getElementById("auth-area");
+const upgradePro = document.getElementById("upgrade-pro");
+const upgradePlus = document.getElementById("upgrade-plus");
+const tierFree = document.getElementById("tier-free");
+let currentUser = null;
+
+function clearAuthArea() {
+  while (authArea.firstChild) authArea.removeChild(authArea.firstChild);
+}
+
+function paymentLinkUrl(base) {
+  if (!currentUser) return "#tarifs";
+  const url = new URL(base);
+  url.searchParams.set("client_reference_id", currentUser.id);
+  if (currentUser.email) url.searchParams.set("prefilled_email", currentUser.email);
+  return url.toString();
+}
+
+function setTierUI(tier) {
+  const rows = [["free", tierFree, null], ["pro", upgradePro, STRIPE_PAYMENT_LINK_PRO], ["plus", upgradePlus, STRIPE_PAYMENT_LINK_PLUS]];
+  rows.forEach(([level, el, link]) => {
+    if (!el) return;
+    if (tier === level) {
+      el.textContent = "Niveau actuel";
+      el.classList.remove("btn-primary");
+      el.classList.add("btn-secondary");
+      el.setAttribute("href", "#tarifs");
+    } else if (link) {
+      el.textContent = level === "pro" ? "Passer à Pro" : "Passer à Plus";
+      el.classList.add("btn-primary");
+      el.classList.remove("btn-secondary");
+      el.setAttribute("href", paymentLinkUrl(link));
+    }
+  });
+}
+
+function renderLoggedOut() {
+  clearAuthArea();
+  const btn = document.createElement("button");
+  btn.className = "nav-cta";
+  btn.type = "button";
+  btn.textContent = "Se connecter avec Google";
+  btn.addEventListener("click", () => {
+    supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin + window.location.pathname },
+    });
+  });
+  authArea.appendChild(btn);
+  setTierUI(null);
+}
+
+function renderLoggedIn(user, tier) {
+  clearAuthArea();
+  const label = document.createElement("span");
+  label.className = "fmuted";
+  label.style.fontSize = "12px";
+  label.textContent = user.email + " · " + tier.toUpperCase();
+  const btn = document.createElement("button");
+  btn.className = "nav-cta";
+  btn.type = "button";
+  btn.textContent = "Se déconnecter";
+  btn.addEventListener("click", () => supabase.auth.signOut());
+  authArea.appendChild(label);
+  authArea.appendChild(btn);
+  setTierUI(tier);
+}
+
+async function refreshProfile() {
+  const { data: { user } } = await supabase.auth.getUser();
+  currentUser = user || null;
+  if (!user) {
+    renderLoggedOut();
+    return;
+  }
+  const { data: profile } = await supabase.from("profiles").select("tier").eq("id", user.id).single();
+  renderLoggedIn(user, profile ? profile.tier : "free");
+}
+
+supabase.auth.onAuthStateChange(() => { refreshProfile(); });
+refreshProfile();
+</script>
