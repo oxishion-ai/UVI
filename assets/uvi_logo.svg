@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Identité visuelle UVI : trois arcs orbitaux (Univers . Vision .
+       Intelligence, dans l'ordre bleu -> cyan -> violet) autour d'un
+       noyau central -- généré par assets/generer_logo.py, NE PAS éditer
+       ce fichier à la main (régénérer le script à la place). -->
+  <circle cx="50.0" cy="50.0" r="48" fill="#060B18"/>
+  <path d="M 50.00 15.60 A 34.40 34.40 0 0 0 16.12 55.97" fill="none" stroke="#3B82F6" stroke-width="11.20" stroke-linecap="round"/>
+  <path d="M 20.21 67.20 A 34.40 34.40 0 0 0 72.11 76.35" fill="none" stroke="#22D3EE" stroke-width="11.20" stroke-linecap="round"/>
+  <path d="M 79.79 67.20 A 34.40 34.40 0 0 0 61.77 17.67" fill="none" stroke="#A855F7" stroke-width="11.20" stroke-linecap="round"/>
+  <circle cx="50.0" cy="50.0" r="17.60" fill="#22D3EE"/>
+  <circle cx="45.07" cy="45.07" r="6.40" fill="#EAF2FF"/>
+</svg>

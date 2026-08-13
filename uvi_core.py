@@ -3,20 +3,56 @@ import ast as pyast
 import operator
 import time
 import json
+import math
 import os
+import random
 import sys
 import re
 import threading
 import queue
+import subprocess
 import tempfile
 import urllib.request
 import urllib.error
+import uvi_auth
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, List, Optional, Dict, Callable, Union
+
+try:
+    # Système interne de rapports de bugs (voir bug_reports.py, à côté de
+    # ce fichier) : capture les plantages inattendus SANS JAMAIS y inclure
+    # de code utilisateur (voir la docstring du module pour la garantie
+    # complète). try/except ici pour la même raison que HAS_TTS/HAS_SHION
+    # plus bas -- un module optionnel absent (ex. quelqu'un copie
+    # uvi_core.py seul, sans bug_reports.py) ne doit jamais empêcher UVI
+    # de démarrer, seulement désactiver silencieusement cette capture.
+    import bug_reports
+    HAS_BUG_REPORTS = True
+except ImportError:
+    HAS_BUG_REPORTS = False
+
+
+def _signaler_crash(exc: BaseException, *, source: str,
+                     error_code: Optional[str] = None,
+                     ast_node_type: Optional[str] = None,
+                     uvi_line: Optional[int] = None) -> None:
+    """Enveloppe fine autour de bug_reports.record_exception -- un seul
+    endroit qui gère HAS_BUG_REPORTS ET avale toute exception secondaire,
+    pour que chaque site d'appel (une douzaine à travers ce fichier) n'ait
+    pas à répéter ces deux gardes individuellement."""
+    if not HAS_BUG_REPORTS:
+        return
+    try:
+        bug_reports.record_exception(
+            exc, source=source, error_code=error_code,
+            ast_node_type=ast_node_type, uvi_line=uvi_line,
+        )
+    except Exception:
+        pass
 
 
 def _charger_config_shion_locale() -> None:
@@ -1014,6 +1050,32 @@ class UVIBytecodeCompilerV2:
             # avant l'appel au compilateur/évaluateur, ligne 2588-2592).
             return []
 
+        if cls == "StopNode":
+            # @STOP : un unique HALT suffit, SANS opcode dédié. La VM
+            # (voir la boucle principale, `elif op == "HALT": break`)
+            # exécute un flux d'instructions PLAT et partagé entre le
+            # top-level et tous les corps de fonction (CALL_FUNC/RET n'y
+            # sautent QUE des adresses de retour, ils ne lancent jamais un
+            # run() imbriqué séparé) -- un HALT rencontré n'importe où
+            # dans ce flux, même au fond d'un appel de fonction récursif,
+            # sort donc immédiatement de TOUTE la boucle `while pc <
+            # len(instrs)`, pas juste de la frame courante. C'est
+            # exactement la sémantique demandée pour @STOP (arrêt total,
+            # pas un simple retour de fonction), obtenue sans toucher à la
+            # VM elle-même. UVIBytecodeOptimizer traite déjà HALT comme
+            # un terminateur inconditionnel (UNCONDITIONAL_TERMINATORS) --
+            # le code mort après un @STOP intra-bloc est donc élagué
+            # correctement si l'optimiseur est utilisé, sans changement
+            # nécessaire là non plus.
+            #
+            # LIMITE ASSUMÉE (cohérente avec le tree-walker, voir
+            # _exec_module_call) : un @STOP à l'intérieur d'un fichier
+            # chargé via MODULE arrête seulement la VM ENFANT de ce
+            # module (son propre run()), pas le script appelant -- le
+            # système de modules exécute le fichier importé dans une VM
+            # séparée, hors du flux plat décrit ci-dessus.
+            return [Instr(OpcodeV1.HALT)]
+
         if cls == "SleepNode":
             # exec_node ligne 1142-1144 : time.sleep(min(duration, 10.0)).
             # Le clamp à 10s est reproduit CÔTÉ VM (builtin SLEEP), pas ici,
@@ -1637,6 +1699,29 @@ class UVIBytecodeCompilerV2:
                  Instr(OpcodeV1.JUMP_ABS, [label_skip])]
                 + body_instrs
                 + [Instr(OpcodeV1.LABEL, [label_skip])])
+
+    def _chained_compare_to_boolop(self, node: pyast.Compare) -> pyast.BoolOp:
+        """a < b < c (pyast.Compare avec len(ops) > 1, cf. site d'appel
+        dans _compile_expr_node) -> (a < b) AND (b < c) : un pyast.BoolOp
+        équivalent, pour réutiliser TEL QUEL le désucrage AND déjà écrit
+        dans _compile_boolop (court-circuit inclus), plutôt que dupliquer
+        cette logique pour ce cas.
+
+        BUG CORRIGÉ (crash, pas juste un écart de comportement) : cette
+        méthode était APPELÉE par _compile_expr_node mais n'avait jamais
+        été écrite — toute comparaison chaînée (`a < b < c`, `0 <= x <
+        10`, etc.) faisait lever un AttributeError brut hors de
+        compile_expr/compile_and_run dès qu'un script en contenait une,
+        alors que le tree-walker (SafeEval._eval, ast.Compare) la gère
+        très bien. Trouvé par la suite de tests tree-walker/VM de ce
+        projet (tests/test_compiler.py), qui compare justement les deux
+        moteurs sur le même script pour détecter ce genre d'écart."""
+        valeurs = []
+        gauche = node.left
+        for op, comparateur in zip(node.ops, node.comparators):
+            valeurs.append(pyast.Compare(left=gauche, ops=[op], comparators=[comparateur]))
+            gauche = comparateur
+        return pyast.BoolOp(op=pyast.And(), values=valeurs)
 
     def _compile_boolop(self, node: pyast.BoolOp) -> List[Instr]:
         """
@@ -2430,7 +2515,12 @@ class UVIVirtualMachine:
             return _NO_PUSH
 
         if name == "SHION_ASK":
-            prompt, var_dest = str(args[0]), str(args[1])
+            # _clamp_string (pas juste str()) : args[0] peut venir d'une
+            # expression évaluée à la volée (ex. concaténation), qui n'a
+            # pas forcément transité par un STORE/LOCAL_STORE déjà clampé
+            # -- même raisonnement et même correctif que côté tree-walker
+            # (_exec_shion), pour que les deux moteurs restent alignés.
+            prompt, var_dest = self._clamp_string(str(args[0])), str(args[1])
             if not prompt.strip():
                 raise UVIRuntimeTrap("SHION_EMPTY_PROMPT")
             if self.shion_ask_fn is None:
@@ -4546,6 +4636,21 @@ DEEPSEEK_MAX_TOKENS = int(os.environ.get("DEEPSEEK_MAX_TOKENS", "8192"))
 # court transformerait une lenteur normale en fausse erreur réseau.
 DEEPSEEK_REQUEST_TIMEOUT_S = int(os.environ.get("DEEPSEEK_REQUEST_TIMEOUT_S", "180"))
 
+# =============================================================================
+# NIVEAUX D'ABONNEMENT -- Shion-flash (Pro) / Shion complet (Plus)
+# =============================================================================
+# Actif UNIQUEMENT quand uvi_auth.is_configured() (SUPABASE_URL/ANON_KEY
+# renseignées -- voir docs/COMPTES_ABONNEMENTS.md). Tant que ce n'est pas le
+# cas, _exec_shion garde son comportement historique non-gaté, piloté par
+# SHION_BACKEND/DEEPSEEK_MODEL_NAME ci-dessus -- développement local
+# inchangé. Une fois configuré : "pro" -> flash (DeepSeek 1,5B, rapide,
+# local), "plus" -> complet (DeepSeek 7B, meilleure qualité, local) ; "free"
+# ou pas de session -> SHION.ASK refusé (voir ERROR_HINTS SHION_*).
+SHION_FLASH_SERVER_URL = os.environ.get("SHION_FLASH_SERVER_URL", "http://localhost:8000")
+SHION_FLASH_MODEL_NAME = os.environ.get("SHION_FLASH_MODEL_NAME", "deepseek-r1-distill-qwen-1.5b")
+SHION_FULL_SERVER_URL = os.environ.get("SHION_FULL_SERVER_URL", "http://localhost:8001")
+SHION_FULL_MODEL_NAME = os.environ.get("SHION_FULL_MODEL_NAME", "deepseek-r1-distill-qwen-7b")
+
 # HAS_SHION conserve son NOM et son SENS pour tout le reste du fichier
 # ("SHION.ASK est utilisable ici"), seule sa provenance change.
 HAS_SHION = HAS_SHION_NATIVE if SHION_BACKEND == "shion" else True
@@ -4657,8 +4762,6 @@ class DeepSeekClient(LLMClient):
     non traduit exactement au moment où l'utilisateur a besoin d'un message
     clair."""
 
-    nom_affichage = "SHION (DeepSeek-R1-Distill-Qwen-7B)"
-
     # Les distillations R1 émettent leur chaîne de pensée entre <think> et
     # </think> AVANT la réponse finale. Deux cas à couvrir, et un seul des
     # deux est évident :
@@ -4686,6 +4789,11 @@ class DeepSeekClient(LLMClient):
         # ".../v1//chat/completions" que certains proxys refusent.
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
+        # Instance, pas classe : nom_affichage était fige a "...-7B" avant
+        # l'ajout du serveur local llama.cpp (docs/SERVEUR_LOCAL_CPU.md),
+        # qui peut aussi servir le 1,5B -- l'onglet SHION affichait donc
+        # "7B" meme quand DEEPSEEK_MODEL_NAME pointait vers le 1,5B.
+        self.nom_affichage = "SHION (%s)" % model_name
         self.api_key = api_key or "uvi-local"
         self.timeout_s = timeout_s
         # BUGFIX : température/budget étaient auparavant lus UNIQUEMENT
@@ -5130,6 +5238,15 @@ ERROR_HINTS: Dict[str, str] = {
         "→ Une seule requête SHION.ASK à la fois. Attendez la réponse "
         "précédente avant d'en relancer une."
     ),
+    "SHION_LOGIN_REQUIRED": (
+        "→ Connecte-toi avec ton compte UVI (bouton Compte de la barre "
+        "d'outils) pour utiliser SHION.ASK."
+    ),
+    "SHION_TIER_LOCKED": (
+        "→ Ton abonnement actuel (Gratuit) n'inclut pas Shion. Passe à "
+        "UVI Pro (Shion-flash) ou UVI Plus (Shion complet) sur le site UVI, "
+        "section Tarifs."
+    ),
     "DRAW_UNAVAILABLE": (
         "→ DRAW.* a besoin du canevas de l'IDE. Indisponible en exécution "
         "headless (CLI/tests) : c'est attendu, pas une panne."
@@ -5209,6 +5326,15 @@ class WhileNode(ASTNode):
 class ForNode(ASTNode):
     count_expr: str = ""
     body: List[Any] = field(default_factory=list)
+
+@dataclass
+class StopNode(ASTNode):
+    """@STOP : sortie anticipée -- arrête tout le programme immédiatement,
+    depuis n'importe quel niveau d'imbrication (corps de IF/FOR/WHILE,
+    fonction, routine, pipe |), pas un simple `break` de boucle. Aucun
+    champ propre (rien à droite de @STOP) : line hérité de ASTNode suffit
+    à identifier la ligne pour les messages de journal."""
+    pass
 
 @dataclass
 class SleepNode(ASTNode):
@@ -5340,6 +5466,65 @@ class UnknownNode(ASTNode):
     raw: str = ""
 
 
+# Référence rapide du langage UVI, à préfixer aux prompts SHION qui
+# portent sur du code UVI (voir UVIIDE._construire_contexte_langage_uvi).
+#
+# POURQUOI CE TEXTE EXISTE : DeepSeek/llama.cpp n'a jamais vu UVI à
+# l'entraînement -- c'est un langage maison. Sans référence, le modèle
+# devine la syntaxe par analogie avec des langages connus (Python, JS...),
+# ce qui produit des explications plausibles mais fausses sur les points
+# où UVI diverge (ex. `~ ... -> ... || ...` pour IF/ELSE n'existe dans
+# aucun langage grand public). Ce texte est dérivé DIRECTEMENT de
+# Lexer.TOKEN_SPEC et de _parse_command/_parse_def/etc. ci-dessus -- à
+# tenir synchronisé si la grammaire change, plutôt que réécrit de mémoire.
+UVI_REFERENCE_LANGAGE = """RÉFÉRENCE RAPIDE DU LANGAGE UVI (langage maison -- pas dans tes données
+d'entraînement. Base-toi UNIQUEMENT sur cette référence et sur l'AST fourni
+plus bas, jamais sur une analogie avec Python/JS/autre.)
+
+Chaque ligne = une instruction. Un "corps" (après une flèche `->`) peut
+contenir plusieurs instructions séparées par `|`.
+
+  # texte                       commentaire (ignoré)
+  var = expr                    affectation
+  ! expr                        affiche expr
+  ?nom                          lit une entrée utilisateur dans `nom`
+  ?E.nom / ?R.nom                idem, convertie en entier / réel
+  _N   (ex: _0.5)                 pause de N secondes -- instruction à part
+                                   entière, pas un appel de fonction
+  @STOP                            sortie anticipée : arrête TOUT le
+                                    programme immédiatement, depuis
+                                    n'importe où (même au fond d'un IF, d'une
+                                    boucle ou d'une fonction) -- pas un
+                                    `break` de boucle, un arrêt total
+  ~ cond -> alors || sinon        IF/ELSE : si `cond` vraie -> bloc `alors`,
+                                   sinon -> bloc après `||`
+  % N -> corps                    FOR : répète `corps` N fois
+  %% cond -> corps                 WHILE : répète `corps` tant que `cond`
+  DEF nom(a, b) -> corps           définit une fonction ; le résultat se
+                                    lit dans la variable `_retour`
+  CALL nom(args)                    appelle une fonction
+  CALL nom(args) -> dest             idem, stocke le résultat dans `dest`
+  *nom                                appelle une routine (sans arguments)
+  TAB nom                             crée un tableau
+  TAB.PUSH/POP/GET/SET/DEL/LEN/PRINT/CREATE nom -> ...   opérations tableau
+  STR.LEN/UPPER/LOWER/TRIM/SPLIT/JOIN/REPLACE/CONTAINS/
+      STARTS/ENDS/SLICE/INDEX/NUM "texte" -> dest        opérations chaîne
+  &save/&load/&list/&delete "fichier" -> ...             disque (VFS)
+  SHION.ASK "prompt" -> var                              interroge SHION
+  DRAW.CLEAR/RECT/CIRCLE/LINE/TEXT/SPRITE/COLOR/POLY ...  dessin (canevas)
+  KEY.DOWN/KEY.PRESSED "touche" -> dest                   clavier (jeux)
+  IMPORT "fichier"                 inclusion textuelle (même portée)
+  MODULE "fichier" -> alias        chargement isolé, accès via alias::nom
+  EXPORT nom                       rend `nom` public dans un fichier MODULE
+  !LEARN "erreur" "correction"     enregistre une correction apprise
+  !SNIPPET motif                   insère un modèle de code prédéfini
+
+  Comparaisons à deux caractères : == != >= <=
+  Chaînes entre guillemets doubles. Parenthèses/virgules réservées aux
+  arguments de CALL/DEF.
+"""
+
+
 class Opcode:
     PUSH       = "PUSH"
     LOAD       = "LOAD"
@@ -5414,6 +5599,7 @@ class UVILexer:
     TOKEN_SPEC = [
         ('COMMENT',   r'#.*'),
         ('SIGNATURE', r'@UVI\b'),
+        ('STOP_CMD',  r'@STOP\b'),
         ('IMPORT',    r'\bIMPORT\b'),
         ('MODULE',    r'\bMODULE\b'),
         ('EXPORT',    r'\bEXPORT\b'),
@@ -5971,6 +6157,9 @@ class UVIParser:
         if first.type == 'SIGNATURE':
             return SignatureNode(line=line_num)
 
+        if first.type == 'STOP_CMD':
+            return StopNode(line=line_num)
+
         if first.type == 'IMPORT':
             expr = self._reconstruct_expr(tokens[1:])
             return ImportNode(line=line_num, filename=expr)
@@ -6075,7 +6264,17 @@ class UVIParser:
 
     def _parse_def(self, tokens, line_num):
         rest = tokens[1:]
-        arrow_split = self._split_tokens_by_type(rest, 'ARROW')
+        # _split_on_first_arrow, PAS _split_tokens_by_type : même bug que
+        # celui déjà documenté et corrigé pour IF/WHILE/FOR (voir la
+        # docstring de _split_on_first_arrow) mais jamais appliqué ICI --
+        # un corps de DEF contenant lui-même une commande à ARROW interne
+        # (CALL f(x) -> dest, TAB.GET/SET, STR.SLICE...) voyait son corps
+        # tronqué juste après le premier ARROW rencontré, silencieusement.
+        # Trouvé par tests/test_compiler.py (suite tree-walker/VM de ce
+        # projet), reproduit avec « DEF F(n) -> CALL G(n) -> tmp » (perdait
+        # sa destination) contre « *R -> CALL G(n) -> tmp » (routine,
+        # correcte, déjà sur _split_on_first_arrow).
+        arrow_split = self._split_on_first_arrow(rest)
         if len(arrow_split) < 2:
             return UnknownNode(line=line_num, raw="DEF invalid")
         body_tokens = arrow_split[1]
@@ -6396,6 +6595,15 @@ class UVIBytecodeCompiler:
             return []
         if isinstance(node, SignatureNode):
             return []
+        if isinstance(node, StopNode):
+            # Désassemblage uniquement (ce compilateur legacy n'est jamais
+            # exécuté, voir en-tête de classe) -- ne PAS retourner []
+            # comme SignatureNode ci-dessus : @STOP est une vraie
+            # instruction avec un effet (arrêt), la faire disparaître du
+            # désassemblage serait le même "BUG SILENCIEUX" déjà corrigé
+            # pour MODULE_LOAD/EXPORT_NAME (voir Opcode.MODULE_LOAD) --
+            # Opcode.HALT existe déjà et porte exactement ce sens.
+            return [Instruction(Opcode.HALT)]
         if isinstance(node, AssignNode):
             if node.is_call and node.call_node:
                 instrs = self._compile_node(node.call_node)
@@ -6791,8 +6999,18 @@ class UVIEvaluator:
         # LIMITE ASSUMÉE : une instruction unique très longue (SLEEP de
         # 30 s, SHION.ASK qui attend le réseau) ne sera pas interrompue
         # avant d'avoir rendu la main. L'arrêt est garanti « à la prochaine
-        # instruction », pas « immédiat ».
+        # instruction », pas « immédiat » -- au sens où une instruction
+        # DÉJÀ EN COURS ne peut pas être coupée en plein vol ; en revanche
+        # AUCUNE instruction suivante, même dans un bloc/appel imbriqué,
+        # ne s'exécute plus une fois ce drapeau levé (garde unique dans
+        # exec_node, voir plus bas).
         self.stop_requested = False
+        # Ligne de la commande @STOP qui a déclenché l'arrêt (StopNode
+        # ci-dessous) ; 0 = pas d'arrêt en cours ou arrêt déclenché par le
+        # bouton ARRÊTER (arreter_script) plutôt que par le script --
+        # permet à run_sequence de distinguer les deux dans son message
+        # de fin, sans dupliquer stop_requested lui-même.
+        self._stop_line = 0
         self.call_depth = 0
         self.function_calls = 0
         self.named_call_counts: Dict[str, int] = {}  # "DEF:nom"/"ROUTINE:nom" -> appels
@@ -6809,15 +7027,57 @@ class UVIEvaluator:
         # subir -- c'était la condition de la bascule, pas un espoir.
         self.shion_client = _build_shion_client() if HAS_SHION else None
         self.shion_is_busy = False  # garde anti-spam, voir _exec_shion
+        self._shion_clients_par_niveau: Dict[str, Any] = {}  # cache "pro"/"plus" -> client, voir _shion_client_pour_niveau
 
     def set_agent(self, agent):
         self.agent = agent
 
+    def _shion_client_pour_niveau(self, tier: str):
+        """Client SHION.ASK pour un niveau d'abonnement donné ("pro" ->
+        Shion-flash/DeepSeek 1,5B, "plus" -> Shion complet/DeepSeek 7B),
+        construit une seule fois par niveau puis mis en cache -- même
+        raison que le cache _moteurs_partages de ShionServingClient : ne
+        pas reconstruire un client (donc perdre son historique de
+        conversation) à chaque appel. Appelé uniquement quand
+        uvi_auth.is_configured() est vrai -- voir _exec_shion."""
+        if tier not in self._shion_clients_par_niveau:
+            if tier == "plus":
+                client = DeepSeekClient(base_url=SHION_FULL_SERVER_URL, model_name=SHION_FULL_MODEL_NAME)
+            else:  # "pro"
+                client = DeepSeekClient(base_url=SHION_FLASH_SERVER_URL, model_name=SHION_FLASH_MODEL_NAME)
+            self._shion_clients_par_niveau[tier] = _DeepSeekAvecReplisLocal(client)
+        return self._shion_clients_par_niveau[tier]
+
+    def _resoudre_client_shion(self):
+        """Point d'entrée UNIQUE pour savoir QUEL client répond à SHION,
+        compte tenu de l'abonnement -- partagé par _exec_shion (SHION.ASK),
+        llm_client_prioritaire (!ERIS(...), onglet de discussion), pour
+        qu'un compte gratuit ne puisse pas contourner le verrouillage en
+        passant par l'un plutôt que l'autre.
+
+        Retourne (client, motif). `motif` vaut "connexion" (personne
+        connecté), "abonnement" (connecté mais niveau "free") ou None
+        (aucun verrouillage applicable -- soit un client valide est
+        retourné, soit c'est une indisponibilité technique ordinaire,
+        cf. SHION_UNAVAILABLE).
+
+        Tant que uvi_auth.is_configured() est faux (SUPABASE_URL/ANON_KEY
+        absentes -- développement local, voir docs/COMPTES_ABONNEMENTS.md),
+        comportement HISTORIQUE inchangé : self.shion_client, choisi une
+        fois pour toutes par _build_shion_client() selon SHION_BACKEND."""
+        if uvi_auth.is_configured():
+            tier = uvi_auth.current_tier()
+            if tier is None:
+                return None, "connexion"
+            if tier == "free":
+                return None, "abonnement"
+            return self._shion_client_pour_niveau(tier), None
+        return self.shion_client, None
+
     def llm_client_prioritaire(self):
         """Rend le client de langage à utiliser pour !ERIS(...) (syntaxe
         d'appel synchrone conservée dans le langage, voir _eval_expr_or_eris)
-        et pour l'onglet de discussion SHION : toujours self.shion_client
-        désormais.
+        et pour l'onglet de discussion SHION.
 
         HISTORIQUE : ERIS (assistant Gemini séparé, clé API personnelle)
         a été retiré -- SHION couvre déjà son rôle sans les inconvénients
@@ -6828,8 +7088,12 @@ class UVIEvaluator:
         méthode garde son nom et sa signature : c'est le point d'entrée
         UNIQUE déjà utilisé par _eval_expr_or_eris ET l'onglet SHION,
         inutile de le dupliquer à deux endroits pour un simple
-        raccourcissement."""
-        return self.shion_client
+        raccourcissement. Le motif de verrouillage (connexion/abonnement)
+        n'est pas distingué ici : IA_INLINE_UNAVAILABLE reste le message
+        générique pour ce chemin synchrone, SHION.ASK (_exec_shion) est
+        l'endroit qui distingue précisément le motif."""
+        client, _motif = self._resoudre_client_shion()
+        return client
 
     def _pump_ui_events(self):
         """Laisse l'hôte (l'IDE) traiter ses évènements en attente pendant
@@ -6954,7 +7218,26 @@ class UVIEvaluator:
     def evaluate(self, value: str):
         value = value.strip()
         if value.startswith('"') and value.endswith('"'):
-            return self._interpolate_string(value[1:-1])
+            # BUG CORRIGÉ : startswith('"') and endswith('"') est vrai
+            # pour BIEN PLUS qu'un littéral unique -- '"a" + "b"' et
+            # '"a" == "a"' commencent et finissent aussi par un guillemet.
+            # L'ancien code prenait alors TOUT le texte entre le PREMIER
+            # et le DERNIER guillemet comme un seul littéral (y compris le
+            # ' + ' ou ' == ' du milieu), donnant 'a" + "b' au lieu de
+            # 'ab', silencieusement -- jamais d'erreur, juste un mauvais
+            # résultat. Vérifie maintenant, via le VRAI lexer (celui qui
+            # fait déjà foi partout ailleurs dans ce fichier), que `value`
+            # tokenize en EXACTEMENT un seul token STRING avant de prendre
+            # ce raccourci ; sinon on tombe dans _eval_expr_or_eris
+            # ci-dessous, qui gère correctement la concaténation/comparaison
+            # (SafeEval._eval, ast.BinOp/ast.Compare) -- seule
+            # l'interpolation {var} au sein d'une expression composée
+            # (ex. '"Bonjour {nom}" + "!"') reste hors de portée de ce
+            # correctif, limite déjà partagée avec le reste de ce chemin
+            # d'évaluation, pas introduite ici.
+            tokens_test = self.lexer.tokenize(value)
+            if len(tokens_test) == 1 and tokens_test[0].type == 'STRING':
+                return self._interpolate_string(value[1:-1])
         if '::' in value and value.count('::') == 1:
             # alias::nom : lecture qualifiée d'un export de module. Un
             # seul '::' attendu -- deux ou plus (ex. 'a::b::c') n'est
@@ -7075,7 +7358,26 @@ class UVIEvaluator:
             self.last_errors = saved_last_errors
 
     def exec_node(self, node: ASTNode):
-        if self.error_flag or node is None:
+        # self.stop_requested inclus dans ce garde (pas seulement
+        # error_flag) : exec_node est le point d'entrée UNIVERSEL de
+        # toute instruction (voir commentaire juste plus bas sur
+        # self.debugger) -- TOUS les corps de bloc (IF/WHILE/FOR, DEF,
+        # routine, MODULE, pipe |) appellent exec_node(n) dans une boucle
+        # `for n in bloc` qui ne revérifie stop_requested qu'à SA propre
+        # boucle englobante (WHILE/FOR) ou au niveau run_sequence -- sans
+        # ce garde ici, une instruction @STOP au milieu d'un bloc IF/DEF/
+        # routine laisserait les instructions SUIVANTES du même bloc
+        # s'exécuter quand même jusqu'à ce que le flux remonte à un point
+        # qui revérifie le drapeau. Le garder ici, au seul endroit par
+        # lequel passe CHAQUE instruction sans exception, rend l'arrêt
+        # immédiat partout d'un coup, sans avoir à toucher individuellement
+        # les neuf boucles de bloc existantes. Bénéfice secondaire : le
+        # bouton ARRÊTER (même drapeau, cf. arreter_script) devient lui
+        # aussi réactif immédiatement, y compris au milieu d'un bloc
+        # imbriqué -- il ne l'était pas avant, silencieusement (l'arrêt
+        # n'était garanti qu'« à la prochaine instruction DU MÊME NIVEAU »,
+        # pas « à la toute prochaine instruction »).
+        if self.error_flag or self.stop_requested or node is None:
             return ""
         if self.agent:
             self.agent.track_instruction(type(node).__name__)
@@ -7101,6 +7403,19 @@ class UVIEvaluator:
             )
 
         if isinstance(node, SignatureNode):
+            return ""
+
+        if isinstance(node, StopNode):
+            # Sortie anticipée : même drapeau que le bouton ARRÊTER
+            # (self.stop_requested), lu par le garde en tête de cette
+            # méthode -- c'est CE garde qui arrête tout le reste du
+            # programme, pas une exception ni un retour spécial. Ligne
+            # mémorisée séparément (self._stop_line) pour que run_sequence
+            # puisse distinguer dans son message « arrêté par @STOP à la
+            # ligne N » d'un « interrompu par l'utilisateur » (bouton) --
+            # les deux partagent stop_requested mais pas la même origine.
+            self._stop_line = node.line
+            self.stop_requested = True
             return ""
 
         if isinstance(node, ImportNode):
@@ -7305,7 +7620,13 @@ class UVIEvaluator:
         if not nom_fic:
             self._emit_error("INVALID_IMPORT", "Nom de fichier/module invalide.", node.line)
             return ""
-        chemin_vfs = self.vfs.get_path(nom_fic)
+        # hasattr : même garde que UVIVirtualMachine._resolve_module_path
+        # (ligne ~2228) -- sans elle, IMPORT plante en AttributeError brut
+        # dès que self.vfs est un InMemoryVFS (aucune méthode get_path),
+        # ce que fait justement HeadlessHost/InMemoryVFS, le harnais de
+        # test officiel de ce projet (voir tests/). La VM avait déjà cette
+        # garde, le tree-walker non -- oubli, pas un choix.
+        chemin_vfs = self.vfs.get_path(nom_fic) if hasattr(self.vfs, "get_path") else None
         chemin_final = chemin_vfs if (chemin_vfs and os.path.exists(chemin_vfs)) else (nom_fic if os.path.exists(nom_fic) else None)
         if chemin_final:
             abs_path = os.path.abspath(chemin_final)
@@ -7355,7 +7676,9 @@ class UVIEvaluator:
             reste = nom_fic[len("pkg:"):]
             nom, _, version = reste.partition("@")
             return registry.resolve_pkg(nom, version if version else None)
-        chemin_vfs = self.vfs.get_path(nom_fic)
+        # hasattr : même garde et même raison que _exec_import ci-dessus
+        # et que UVIVirtualMachine._resolve_module_path (ligne ~2228).
+        chemin_vfs = self.vfs.get_path(nom_fic) if hasattr(self.vfs, "get_path") else None
         if chemin_vfs and os.path.exists(chemin_vfs):
             return chemin_vfs
         if os.path.exists(nom_fic):
@@ -7534,6 +7857,8 @@ class UVIEvaluator:
                 self.exec_node(n)
             retour_val = self.memoire.get('_retour', "")
         except Exception as e:
+            _signaler_crash(e, source="tree_walker_call", error_code="RUNTIME_ERROR",
+                             ast_node_type="CallNode", uvi_line=node.line)
             self._emit_error("RUNTIME_ERROR", f"Erreur dans la fonction : {e}", node.line)
             retour_val = ""
         finally:
@@ -7620,12 +7945,31 @@ class UVIEvaluator:
                 self.exec_node(n)
             retour_val = self.memoire.get('_retour', "")
         except Exception as e:
+            _signaler_crash(e, source="tree_walker_module_call", error_code="RUNTIME_ERROR",
+                             ast_node_type="CallNode", uvi_line=node.line)
             self._emit_error("RUNTIME_ERROR", f"Erreur dans la fonction '{alias}::{nom_func}' : {e}", node.line)
             retour_val = ""
         finally:
             self.memoire = saved_memoire
             self.current_memory_usage = saved_memory_usage
             self.call_depth -= 1
+        # « CALL alias::nom(x) -> dest » : BUG CORRIGÉ -- ce stockage
+        # existe déjà pour CALL nom(x) -> dest à la fin de _exec_call
+        # (juste après son propre try/finally), mais _exec_call RETOURNE
+        # TÔT vers _exec_module_call dès qu'il voit '::' dans node.name
+        # (voir plus haut, juste avant l'incrément de call_depth), donc ce
+        # code-là n'était JAMAIS atteint pour un appel qualifié -- «
+        # CALL m::carre(5) -> r » exécutait bien la fonction du module
+        # (valeur de retour correcte dans retour_val), mais `r` restait
+        # vide, silencieusement, aucune erreur. La VM n'a pas ce bug (le
+        # STORE après CALL_MODULE_FUNC est émis par _compile_node_inner,
+        # au niveau du nœud CallNode, pas dans _compile_call_node
+        # lui-même) -- trouvé en creusant pourquoi
+        # test_module_crashes_on_in_memory_vfs_BUG (tests/) échouait
+        # encore sur la VALEUR après que le crash AttributeError original
+        # (get_path non gardé) a été corrigé.
+        if getattr(node, "dest", None):
+            self._safe_store(node.dest, retour_val)
         return retour_val
 
     def _exec_tab(self, node: TabNode):
@@ -7853,11 +8197,26 @@ class UVIEvaluator:
             )
             return ""
 
-        if not HAS_SHION or self.shion_client is None:
+        client, motif = self._resoudre_client_shion()
+        if motif == "connexion":
+            self._emit_error(
+                "SHION_LOGIN_REQUIRED",
+                "SHION.ASK nécessite un compte UVI connecté.",
+                node.line,
+            )
+            return ""
+        if motif == "abonnement":
+            self._emit_error(
+                "SHION_TIER_LOCKED",
+                "SHION.ASK n'est pas inclus dans l'abonnement Gratuit.",
+                node.line,
+            )
+            return ""
+        if not HAS_SHION or client is None:
             self._emit_error(
                 "SHION_UNAVAILABLE",
                 "Aucun backend SHION.ASK disponible ici (paquet shion/ absent, "
-                "ou SHION_BACKEND=deepseek sans serveur vLLM joignable). "
+                "ou serveur configuré injoignable). "
                 "SHION.ASK ne peut pas s'exécuter dans ce contexte.",
                 node.line,
             )
@@ -7882,6 +8241,15 @@ class UVIEvaluator:
             return ""
 
         prompt = str(self.evaluate(ops[0]))
+        # Même plafond que _safe_store (MAX_STRING_LENGTH), appliqué ICI en
+        # plus : ops[0] peut être une expression évaluée à la volée (ex.
+        # concaténation de plusieurs variables déjà au plafond chacune) et
+        # n'a donc pas forcément transité par _safe_store avant d'atteindre
+        # ce point -- sans ce clamp, un script pourrait envoyer un prompt
+        # plus long que ce que toute variable UVI ne pourrait jamais
+        # contenir, gaspillant des tokens/coûts d'API pour rien d'utile.
+        if len(prompt) > MAX_STRING_LENGTH:
+            prompt = prompt[:MAX_STRING_LENGTH]
         var_dest = ops[1].strip()
 
         if not prompt.strip():
@@ -7899,7 +8267,7 @@ class UVIEvaluator:
         self.ide._set_status(f"⏳ Shion réfléchit… (résultat -> {var_dest})")
 
         thread = threading.Thread(
-            target=self._shion_worker, args=(prompt, var_dest, node.line), daemon=True,
+            target=self._shion_worker, args=(prompt, var_dest, node.line, client), daemon=True,
         )
         thread.start()
         return ""
@@ -7923,7 +8291,7 @@ class UVIEvaluator:
         else:
             travail()
 
-    def _shion_worker(self, prompt: str, var_dest: str, line: int):
+    def _shion_worker(self, prompt: str, var_dest: str, line: int, client=None):
         """
         Tourne sur un thread séparé. NE JAMAIS toucher un widget Tkinter
         directement ici (Tkinter n'est pas thread-safe) — tout ce qui touche
@@ -7932,16 +8300,23 @@ class UVIEvaluator:
         comme le fait déjà run_script() ailleurs dans ce fichier pour son
         propre callback de fin.
 
+        `client` est le client déjà résolu par _exec_shion (via
+        _resoudre_client_shion -- tient compte de l'abonnement). Paramètre
+        optionnel avec repli sur self.shion_client pour tout appelant
+        antérieur à l'ajout des niveaux d'abonnement.
+
         self.shion_is_busy est remis à False dans tous les cas (succès ou
         échec) avant de retourner, pour ne jamais laisser SHION.ASK bloqué
         indéfiniment après une erreur réseau.
         """
+        if client is None:
+            client = self.shion_client
         try:
             # Note : timeout=60s est câblé en dur dans ShionServingClient.complete()
             # (serving.py), pas paramétrable depuis ici sans modifier serving.py —
             # hors scope de cette intégration. SHION_REQUEST_TIMEOUT_S (config
             # ci-dessus) documente cette valeur mais ne la contrôle pas.
-            result = self.shion_client.complete(prompt)
+            result = client.complete(prompt)
         except Exception as e:
             # Python supprime automatiquement la variable `e` d'un bloc
             # except à la sortie de ce bloc (voir la doc du langage sur
@@ -8239,12 +8614,17 @@ class UVIEvaluator:
                 # Pas un _emit_error : une interruption VOULUE n'est pas une
                 # erreur du script, et la signaler comme telle déclencherait
                 # l'auto-réparation de l'agent sur un script sain.
-                self.ide.log("⏹ Exécution interrompue par l'utilisateur.", "sys")
+                if self._stop_line:
+                    self.ide.log(f"⏹ Sortie anticipée : @STOP (ligne {self._stop_line}).", "sys")
+                else:
+                    self.ide.log("⏹ Exécution interrompue par l'utilisateur.", "sys")
                 break
             self.current_run_line = node.line if node.line > 0 else 0
             try:
                 self.exec_node(node)
             except Exception as e:
+                _signaler_crash(e, source="tree_walker", error_code="CRASH",
+                                 ast_node_type=type(node).__name__, uvi_line=node.line)
                 self._emit_error("CRASH", f"Crash ligne {node.line} : {e}", node.line)
 
         if not is_sub_sequence:
@@ -8253,11 +8633,14 @@ class UVIEvaluator:
 
     def run_single_command(self, cmd):
         self.error_flag = False
+        node = None
         try:
             node = self.parser.parse_line(cmd, 0)
             if node:
                 self.exec_node(node)
         except Exception as e:
+            _signaler_crash(e, source="tree_walker_repl", error_code="RUNTIME_ERROR",
+                             ast_node_type=type(node).__name__ if node else None)
             self._emit_error("RUNTIME_ERROR", str(e))
 
 
@@ -8868,6 +9251,55 @@ class T:
     UI_TITRE = ("Segoe UI", 10, "bold")
 
 
+def dessiner_noyau_uvi(canvas: "tk.Canvas", cx: float, cy: float, rayon: float,
+                        *, epaisseur: Optional[float] = None,
+                        tags: str = "") -> None:
+    """Dessine le « noyau » UVI : trois arcs orbitaux (Univers · Vision ·
+    Intelligence) autour d'un point central -- l'identité visuelle du
+    projet, dans le même vocabulaire graphique que l'avatar SHION (formes
+    Canvas pures, pas d'image bitmap) et que l'ancien badge deux-cercles de
+    la barre du haut, dont ce dessin est l'extension directe : le grand
+    cercle plein devient trois arcs de couleur, le petit point central est
+    conservé tel quel.
+
+    Vectoriel et redessiné à la taille demandée (pas un bitmap figé) : le
+    même appel sert au badge 34px de la barre du haut comme à une future
+    fenêtre « À propos » en plus grand, sans perte de netteté -- cohérent
+    avec le choix déjà fait pour l'avatar SHION (formes recalculées à
+    chaque image plutôt qu'image pré-rendue).
+
+    `epaisseur` par défaut à ~28% du rayon : assez épais pour rester lisible
+    à 16-20px de rayon, sans manger le disque central aux tailles plus
+    grandes."""
+    if epaisseur is None:
+        epaisseur = max(2.0, rayon * 0.28)
+    r_arc = rayon - epaisseur / 2.0
+    # 100° d'arc pour 20° de coupure entre les trois orbites : la coupure
+    # est ce qui lit visuellement "trois éléments distincts" plutôt qu'un
+    # simple anneau plein -- sans elle, le message "trois piliers" du nom
+    # UVI (Univers / Vision / Intelligence) disparaît.
+    for angle_depart, couleur in (
+        (90, T.BLEU_VIF),   # Univers
+        (210, T.CYAN),      # Vision
+        (330, T.VIOLET),    # Intelligence
+    ):
+        canvas.create_arc(
+            cx - r_arc, cy - r_arc, cx + r_arc, cy + r_arc,
+            start=angle_depart, extent=100, style=tk.ARC,
+            outline=couleur, width=max(1, round(epaisseur)),
+            tags=tags,
+        )
+    r_coeur = rayon * 0.44
+    canvas.create_oval(cx - r_coeur, cy - r_coeur, cx + r_coeur, cy + r_coeur,
+                        fill=T.CYAN, outline="", tags=tags)
+    r_reflet = rayon * 0.16
+    dx = -r_coeur * 0.28
+    dy = -r_coeur * 0.28
+    canvas.create_oval(cx + dx - r_reflet, cy + dy - r_reflet,
+                        cx + dx + r_reflet, cy + dy + r_reflet,
+                        fill=T.TEXTE_FORT, outline="", tags=tags)
+
+
 class _Tooltip:
     """Infobulle Tkinter minimale, écrite ici plutôt qu'importée.
 
@@ -8990,8 +9422,846 @@ TOOLBAR_TOOLTIPS: Dict[str, str] = {
 }
 
 
+# =============================================================================
+# SHION AVATAR — système comportemental (état, priorité, micro-animations)
+# =============================================================================
+#
+# CONTRAINTE À CONNAÎTRE AVANT DE LIRE CE QUI SUIT : ce projet est du
+# Tkinter pur (aucune dépendance graphique externe, cf. philosophie
+# "zéro framework" du reste du dépôt). Le Canvas Tkinter sait dessiner des
+# formes (ovales, arcs, lignes), les redessiner en boucle via root.after()
+# (voir _rafraichir_horloge pour le précédent déjà dans ce fichier), et
+# recevoir des événements souris -- c'est LARGEMENT assez pour un visage
+# expressif animé par des formes, des couleurs et du mouvement. Ce qu'il
+# NE sait PAS faire nativement : flou, halo (glow) semi-transparent,
+# particules -- Tkinter n'a pas de canal alpha sur les couleurs, et
+# composer de vraies images nécessiterait Pillow (dépendance absente du
+# projet). Le halo est donc APPROCHÉ par des anneaux concentriques de
+# teintes pleines plutôt que par un vrai flou gaussien -- assumé, pas un
+# oubli. Tout le reste de la demande (machine à états, priorités,
+# animations composables, micro-animations, réaction au curseur, event
+# bus, API publique, mode debug) est implémenté réellement, pas en
+# pseudo-code.
+#
+# ARCHITECTURE (EVENT -> CONTEXTE -> DÉCISION -> ÉTAT -> ANIMATION -> RENDU) :
+#
+#   EventBus            -- pub/sub découplé, l'appli émet, l'avatar écoute
+#        |
+#   ShionBehaviorController -- traduit un événement en demande d'état
+#        |                      (la "décision" -- couche volontairement
+#        |                      simple aujourd'hui, remplaçable plus tard
+#        |                      par quelque chose de plus intelligent
+#        |                      sans toucher au reste, voir sa docstring)
+#        v
+#   ShionEmotionController  -- machine à états : respecte priorité,
+#        |                      durée minimale (hystérésis), durée par
+#        |                      défaut avant retour à IDLE
+#        v
+#   ShionAnimationController -- interpole les TRAITS visuels courants
+#        |                       vers ceux de l'état actif (easing), et
+#        |                       superpose les micro-animations IDLE
+#        v
+#   ShionAvatarRenderer      -- dessine les traits sur le Canvas, à
+#                                ~30 im/s (root.after, jamais un thread :
+#                                même règle que le reste de l'UI Tkinter)
+#
+#   ShionInteractionDetector -- lié aux événements souris du Canvas,
+#                                émet lui-même sur l'EventBus (survol,
+#                                approche, éloignement)
+#
+#   ShionAvatar               -- façade publique regroupant tout ça,
+#                                voir sa docstring pour l'API.
+
+class AvatarState(str, Enum):
+    """Hérite de str : comparable directement à une chaîne (utile dans
+    les logs/debug) tout en restant un vrai Enum (fautes de frappe
+    détectées à l'usage, pas seulement à l'exécution d'un cas précis)."""
+    IDLE = "IDLE"
+    CURIOUS = "CURIOUS"
+    SURPRISED = "SURPRISED"
+    HAPPY = "HAPPY"
+    EXCITED = "EXCITED"
+    FOCUSED = "FOCUSED"
+    THINKING = "THINKING"
+    CONFUSED = "CONFUSED"
+    ANGRY = "ANGRY"
+    SAD = "SAD"
+    SLEEPY = "SLEEPY"
+    PROCESSING = "PROCESSING"
+    SUCCESS = "SUCCESS"
+    ERROR = "ERROR"
+
+
+@dataclass(frozen=True)
+class _Traits:
+    """Paramètres visuels COMPOSABLES d'une expression -- voir §6 de la
+    demande d'origine. Un état ne code pas une "animation" au sens
+    d'une séquence de dessins : il code un JEU DE VALEURS ici, que
+    ShionAnimationController interpole depuis les valeurs courantes.
+    C'est cette composition (yeux + bouche + inclinaison + échelle +
+    couleur, indépendants les uns des autres) qui permet de décrire
+    "curieux" ou "en colère" comme une COMBINAISON plutôt qu'un sprite
+    figé par émotion."""
+    decalage_x: float = 0.0        # px, tête qui se penche latéralement
+    decalage_y: float = 0.0        # px, rebond/affaissement
+    inclinaison: float = 0.0       # -1..1, penche la tête (yeux/sourcils asymétriques)
+    echelle: float = 1.0           # 1 = taille normale
+    ouverture_yeux: float = 1.0    # 0 = fermés, 1 = normal, 1.6 = écarquillés
+    ecart_yeux: float = 1.0        # écartement des yeux (1 = normal)
+    courbure_bouche: float = 0.0   # -1 triste, 0 neutre, +1 sourire
+    ouverture_bouche: float = 0.15  # 0 fermée, 1 grande ouverte
+    sourcils: float = 0.0          # -1 froncés/en colère, 0 neutre, +1 relevés/inquiets
+    couleur: str = T.CYAN
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def _ease_out_cubic(t: float) -> float:
+    """Accélère puis ralentit en douceur vers la cible -- une
+    transition "position = nouvellePosition" instantanée est exactement
+    ce que §11 de la demande d'origine proscrit."""
+    t = max(0.0, min(1.0, t))
+    return 1.0 - (1.0 - t) ** 3
+
+
+def _lerp_traits(a: _Traits, b: _Traits, t: float) -> _Traits:
+    t = _ease_out_cubic(t)
+    return _Traits(
+        decalage_x=_lerp(a.decalage_x, b.decalage_x, t),
+        decalage_y=_lerp(a.decalage_y, b.decalage_y, t),
+        inclinaison=_lerp(a.inclinaison, b.inclinaison, t),
+        echelle=_lerp(a.echelle, b.echelle, t),
+        ouverture_yeux=_lerp(a.ouverture_yeux, b.ouverture_yeux, t),
+        ecart_yeux=_lerp(a.ecart_yeux, b.ecart_yeux, t),
+        courbure_bouche=_lerp(a.courbure_bouche, b.courbure_bouche, t),
+        ouverture_bouche=_lerp(a.ouverture_bouche, b.ouverture_bouche, t),
+        sourcils=_lerp(a.sourcils, b.sourcils, t),
+        couleur=b.couleur if t >= 0.5 else a.couleur,  # pas d'interpolation de teinte : évite un dégradé boueux
+    )
+
+
+@dataclass(frozen=True)
+class _DefEtat:
+    priorite: int
+    traits: _Traits
+    duree_min_s: float = 0.5          # hystérésis : protège contre le zapping (§13)
+    duree_defaut_s: Optional[float] = 2.4  # None = reste jusqu'au prochain événement (IDLE, FOCUSED...)
+
+
+# Table §5 (priorités) + §6 (traits par émotion), un seul endroit pour
+# les deux -- une émotion à haute priorité DOIT pouvoir interrompre une
+# animation en cours de priorité plus faible (§5, exemple CURIOUS/ERROR).
+_DEF_ETATS: Dict[AvatarState, _DefEtat] = {
+    AvatarState.IDLE: _DefEtat(
+        priorite=0, duree_defaut_s=None,
+        traits=_Traits(couleur=T.CYAN),
+    ),
+    AvatarState.SLEEPY: _DefEtat(
+        priorite=5, duree_min_s=1.0, duree_defaut_s=None,
+        traits=_Traits(ouverture_yeux=0.25, courbure_bouche=-0.1,
+                       decalage_y=1.5, couleur=T.TEXTE_FAIBLE),
+    ),
+    AvatarState.THINKING: _DefEtat(
+        priorite=40, duree_min_s=0.6, duree_defaut_s=None,
+        traits=_Traits(inclinaison=0.35, ouverture_yeux=0.8, ecart_yeux=0.9,
+                       courbure_bouche=-0.15, couleur=T.VIOLET),
+    ),
+    AvatarState.PROCESSING: _DefEtat(
+        priorite=45, duree_min_s=0.6, duree_defaut_s=None,
+        traits=_Traits(echelle=1.0, ouverture_yeux=0.7, ecart_yeux=0.9,
+                       courbure_bouche=0.0, couleur=T.BLEU),
+    ),
+    AvatarState.CURIOUS: _DefEtat(
+        priorite=50, duree_min_s=0.5, duree_defaut_s=2.2,
+        traits=_Traits(inclinaison=0.5, ouverture_yeux=1.15, courbure_bouche=0.15,
+                       sourcils=0.3, couleur=T.CYAN),
+    ),
+    AvatarState.FOCUSED: _DefEtat(
+        priorite=55, duree_min_s=0.8, duree_defaut_s=None,
+        traits=_Traits(ouverture_yeux=0.85, ecart_yeux=0.95, courbure_bouche=-0.05,
+                       sourcils=-0.15, couleur=T.CYAN),
+    ),
+    AvatarState.HAPPY: _DefEtat(
+        priorite=60, duree_min_s=0.6, duree_defaut_s=2.2,
+        traits=_Traits(courbure_bouche=0.85, ouverture_bouche=0.35, ouverture_yeux=0.9,
+                       sourcils=0.15, decalage_y=-1.0, couleur=T.VERT),
+    ),
+    AvatarState.SUCCESS: _DefEtat(
+        priorite=65, duree_min_s=0.6, duree_defaut_s=1.8,
+        traits=_Traits(courbure_bouche=0.9, ouverture_yeux=0.95, echelle=1.08,
+                       decalage_y=-1.5, couleur=T.VERT),
+    ),
+    AvatarState.EXCITED: _DefEtat(
+        priorite=70, duree_min_s=0.6, duree_defaut_s=1.8,
+        traits=_Traits(courbure_bouche=0.7, ouverture_bouche=0.5, echelle=1.12,
+                       ouverture_yeux=1.2, decalage_y=-2.0, couleur=T.AMBRE),
+    ),
+    AvatarState.SAD: _DefEtat(
+        priorite=75, duree_min_s=1.0, duree_defaut_s=2.6,
+        traits=_Traits(courbure_bouche=-0.7, ouverture_yeux=0.6, sourcils=0.4,
+                       decalage_y=1.5, echelle=0.95, couleur=T.TEXTE),
+    ),
+    AvatarState.ANGRY: _DefEtat(
+        priorite=80, duree_min_s=0.8, duree_defaut_s=2.2,
+        traits=_Traits(sourcils=-0.9, courbure_bouche=-0.4, ouverture_yeux=0.75,
+                       ecart_yeux=0.85, couleur=T.ROUGE),
+    ),
+    AvatarState.CONFUSED: _DefEtat(
+        priorite=85, duree_min_s=0.8, duree_defaut_s=2.6,
+        traits=_Traits(inclinaison=-0.6, sourcils=0.25, courbure_bouche=-0.25,
+                       ecart_yeux=1.1, couleur=T.AMBRE),
+    ),
+    AvatarState.SURPRISED: _DefEtat(
+        priorite=90, duree_min_s=0.4, duree_defaut_s=1.4,
+        traits=_Traits(ouverture_yeux=1.6, ouverture_bouche=0.8, echelle=1.1,
+                       decalage_y=-1.0, sourcils=0.5, couleur=T.ROSE),
+    ),
+    AvatarState.ERROR: _DefEtat(
+        priorite=100, duree_min_s=0.8, duree_defaut_s=2.0,
+        traits=_Traits(sourcils=-0.7, courbure_bouche=-0.5, ouverture_yeux=0.9,
+                       echelle=1.05, couleur=T.ROUGE),
+    ),
+}
+
+
+@dataclass
+class ShionAvatarConfig:
+    """§20 : configuration centralisée plutôt que des valeurs éparpillées
+    dans le code. Toutes les émotions restent réglables via _DEF_ETATS
+    (table dédiée juste au-dessus, séparée pour rester lisible) ; ceci ne
+    regroupe que les réglages GLOBAUX au comportement, pas par-émotion."""
+    animation_speed: float = 1.0
+    idle_intensity: float = 0.35
+    spontaneous_behavior: bool = True
+    cursor_tracking: bool = True
+    debug: bool = False
+
+
+class EventBus:
+    """Pub/sub minimal (§15). Volontairement sans dépendance au reste de
+    l'application : ShionAvatar ne connaît QUE cet objet, jamais
+    directement l'IDE, l'éditeur ou le moteur -- c'est ce qui permet à
+    n'importe quel composant d'émettre des événements vers l'avatar sans
+    créer un couplage fort dans les deux sens."""
+
+    def __init__(self):
+        self._abonnes: Dict[str, List[Callable[..., None]]] = {}
+
+    def on(self, evenement: str, fn: Callable[..., None]) -> None:
+        self._abonnes.setdefault(evenement, []).append(fn)
+
+    def emit(self, evenement: str, **donnees) -> None:
+        for fn in list(self._abonnes.get(evenement, ())):
+            try:
+                fn(**donnees)
+            except Exception:
+                pass  # un abonné fautif ne doit jamais empêcher les autres de recevoir l'événement
+
+
+class ShionEmotionController:
+    """Machine à états (§4) : priorité (§5) + hystérésis/cooldown (§13).
+
+    Règle centrale, celle qui fait toute la différence avec un simple
+    `if event: play(animation)` (§23) : une demande de transition n'est
+    honorée QUE si le nouvel état a une priorité supérieure OU ÉGALE à
+    l'état courant, OU que la durée minimale de l'état courant est déjà
+    écoulée. Un ERROR (100) interrompt donc toujours un CURIOUS (50) en
+    cours, mais deux CURIOUS consécutifs répétés en rafale ne se
+    chevauchent pas frénétiquement."""
+
+    def __init__(self, sur_changement: Optional[Callable[[AvatarState, AvatarState], None]] = None):
+        self.etat = AvatarState.IDLE
+        self.etat_precedent = AvatarState.IDLE
+        self._depuis = time.time()
+        self._sur_changement = sur_changement
+
+    def definition(self, etat: Optional[AvatarState] = None) -> _DefEtat:
+        return _DEF_ETATS[etat if etat is not None else self.etat]
+
+    def demander_etat(self, nouvel_etat: AvatarState, forcer: bool = False) -> bool:
+        if nouvel_etat == self.etat and not forcer:
+            return False
+        actuelle = self.definition()
+        nouvelle = self.definition(nouvel_etat)
+        ecoule = time.time() - self._depuis
+        if not forcer and nouvelle.priorite < actuelle.priorite and ecoule < actuelle.duree_min_s:
+            return False  # état courant encore protégé (hystérésis, §13)
+        ancien = self.etat
+        self.etat_precedent = ancien
+        self.etat = nouvel_etat
+        self._depuis = time.time()
+        if self._sur_changement:
+            self._sur_changement(ancien, nouvel_etat)
+        return True
+
+    def temps_dans_etat(self) -> float:
+        return time.time() - self._depuis
+
+    def tick(self) -> None:
+        """Retour automatique à IDLE une fois la durée par défaut de
+        l'état actif écoulée (§4 "comportement de retour à l'état
+        précédent") -- appelé à chaque image par ShionAvatarRenderer."""
+        d = self.definition()
+        if self.etat != AvatarState.IDLE and d.duree_defaut_s is not None:
+            if self.temps_dans_etat() >= d.duree_defaut_s:
+                self.demander_etat(AvatarState.IDLE)
+
+
+class ShionAnimationController:
+    """Traduit l'état actif en TRAITS affichés (§6), en interpolant en
+    douceur depuis les traits actuellement affichés (§11 -- jamais un
+    saut brut), et superpose les micro-animations IDLE (§7 : clignement,
+    respiration, petit regard) au-dessus des traits de base -- ADDITIF,
+    pas un état de plus dans la machine à états, pour ne jamais entrer
+    en conflit avec une émotion "sérieuse" en cours (une micro-animation
+    ne s'applique QUE si l'état actif est IDLE, voir step())."""
+
+    _DUREE_TRANSITION_S = 0.35
+
+    def __init__(self, controleur: ShionEmotionController, config: ShionAvatarConfig):
+        self._controleur = controleur
+        self._config = config
+        self._traits_depart = _DEF_ETATS[AvatarState.IDLE].traits
+        self._traits_cible = self._traits_depart
+        self._debut_transition = time.time()
+        self._etat_anime_pour = controleur.etat
+        # micro-animations (§7) : chacune a sa probabilité par tick et son cooldown
+        self._prochain_clin_oeil = time.time() + random.uniform(2.0, 5.0)
+        self._clin_oeil_jusqua = 0.0
+        self._prochain_mouvement_tete = time.time() + random.uniform(4.0, 9.0)
+        self._decalage_tete_micro = 0.0
+        self._t0_respiration = time.time()
+
+    def _traits_courants(self) -> _Traits:
+        duree = max(1e-6, self._DUREE_TRANSITION_S / max(0.1, self._config.animation_speed))
+        t = (time.time() - self._debut_transition) / duree
+        return _lerp_traits(self._traits_depart, self._traits_cible, t)
+
+    def step(self) -> _Traits:
+        # Une nouvelle cible est apparue (changement d'état) : on repart
+        # de ce qui est AFFICHÉ MAINTENANT (pas de l'ancienne cible), pour
+        # qu'une interruption en cours de transition reste fluide plutôt
+        # que de sauter en arrière (§19, "les animations doivent être
+        # annulables").
+        if self._controleur.etat != self._etat_anime_pour:
+            self._traits_depart = self._traits_courants()
+            self._traits_cible = self._controleur.definition().traits
+            self._debut_transition = time.time()
+            self._etat_anime_pour = self._controleur.etat
+
+        base = self._traits_courants()
+
+        if self._controleur.etat != AvatarState.IDLE or not self._config.spontaneous_behavior:
+            return base
+
+        # --- micro-animations, IDLE uniquement (§7, §14) -----------------
+        maintenant = time.time()
+        intensite = self._config.idle_intensity
+
+        # respiration : oscillation lente et continue, jamais interrompue
+        respiration = math.sin((maintenant - self._t0_respiration) * 1.1) * 0.6 * intensite
+
+        # clignement : probabiliste, cooldown, durée courte
+        if maintenant >= self._prochain_clin_oeil and self._clin_oeil_jusqua == 0.0:
+            self._clin_oeil_jusqua = maintenant + 0.12
+            self._prochain_clin_oeil = maintenant + random.uniform(2.5, 6.0)
+        ouverture_yeux = base.ouverture_yeux
+        if maintenant < self._clin_oeil_jusqua:
+            ouverture_yeux = 0.05
+        elif self._clin_oeil_jusqua and maintenant >= self._clin_oeil_jusqua:
+            self._clin_oeil_jusqua = 0.0
+
+        # petit mouvement de tête occasionnel : probabilité moyenne, rare
+        if maintenant >= self._prochain_mouvement_tete:
+            self._decalage_tete_micro = random.uniform(-0.4, 0.4) * intensite
+            self._prochain_mouvement_tete = maintenant + random.uniform(5.0, 11.0)
+
+        return _Traits(
+            decalage_x=base.decalage_x + self._decalage_tete_micro,
+            decalage_y=base.decalage_y + respiration,
+            inclinaison=base.inclinaison + self._decalage_tete_micro * 0.5,
+            echelle=base.echelle + respiration * 0.01,
+            ouverture_yeux=ouverture_yeux,
+            ecart_yeux=base.ecart_yeux,
+            courbure_bouche=base.courbure_bouche,
+            ouverture_bouche=base.ouverture_bouche,
+            sourcils=base.sourcils,
+            couleur=base.couleur,
+        )
+
+
+class ShionAvatarRenderer:
+    """Dessine les TRAITS courants sur un Canvas Tkinter, à ~30 im/s via
+    root.after (JAMAIS un thread -- même contrainte que tout le reste de
+    cette interface, voir _rafraichir_horloge pour le précédent déjà
+    présent dans ce fichier). Le halo est approché par des anneaux
+    concentriques opaques plutôt qu'un vrai flou (voir le commentaire en
+    tête de section) -- décision assumée, pas un raccourci caché."""
+
+    _INTERVALLE_MS = 33
+
+    def __init__(self, canvas: tk.Canvas, animation: ShionAnimationController,
+                 config: ShionAvatarConfig, taille: int = 56):
+        self.canvas = canvas
+        self._animation = animation
+        self._config = config
+        self._taille = taille
+        self._centre = taille / 2
+        self._actif = True
+        self._apres_id: Optional[str] = None
+
+    def demarrer(self) -> None:
+        if self._apres_id is None:
+            self._tick()
+
+    def arreter(self) -> None:
+        if self._apres_id is not None:
+            try:
+                self.canvas.after_cancel(self._apres_id)
+            except tk.TclError:
+                pass
+            self._apres_id = None
+
+    def _tick(self) -> None:
+        try:
+            if self._config.debug is not None:  # simple lecture pour valider que le canvas existe encore
+                pass
+            traits = self._animation.step()
+            if self._actif:
+                self._dessiner(traits)
+            self._apres_id = self.canvas.after(self._INTERVALLE_MS, self._tick)
+        except tk.TclError:
+            self._apres_id = None  # fenêtre/canvas détruits : on arrête proprement, pas d'exception qui remonte
+
+    def _dessiner(self, tr: _Traits) -> None:
+        c = self.canvas
+        c.delete("all")
+        cx = self._centre + tr.decalage_x
+        cy = self._centre + tr.decalage_y
+        r = self._centre - 3
+        r *= max(0.5, tr.echelle)
+
+        # halo (approximation sans flou réel, voir docstring de la classe)
+        if r > 4:
+            c.create_oval(cx - r - 4, cy - r - 4, cx + r + 4, cy + r + 4,
+                         outline=tr.couleur, width=1)
+
+        # tête / corps
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, outline=tr.couleur, width=2)
+
+        # yeux (écartement, ouverture, inclinaison composés ensemble)
+        ecart = r * 0.42 * tr.ecart_yeux
+        oy = max(0.05, tr.ouverture_yeux)
+        rayon_oeil = max(0.6, r * 0.16 * min(1.3, oy))
+        hauteur_oeil = max(0.6, rayon_oeil * min(1.0, oy))
+        decalage_incl = tr.inclinaison * r * 0.12
+        for signe in (-1, 1):
+            ex = cx + signe * ecart
+            ey = cy - r * 0.12 + (decalage_incl if signe < 0 else -decalage_incl) * 0.4
+            c.create_oval(ex - rayon_oeil, ey - hauteur_oeil, ex + rayon_oeil, ey + hauteur_oeil,
+                         fill=tr.couleur, outline="")
+            # sourcil : simple segment, angle piloté par tr.sourcils
+            sx0, sx1 = ex - rayon_oeil * 1.3, ex + rayon_oeil * 1.3
+            sy = ey - hauteur_oeil - r * 0.18
+            pente = -tr.sourcils * r * 0.12 * signe
+            c.create_line(sx0, sy + pente * 0.3, sx1, sy - pente * 0.3,
+                         fill=tr.couleur, width=2, capstyle=tk.ROUND)
+
+        # bouche : arc dont la courbure et l'ouverture sont composées
+        largeur_bouche = r * 0.55
+        hauteur_bouche = max(1.0, r * 0.25 * (0.15 + tr.ouverture_bouche))
+        by = cy + r * 0.38
+        if abs(tr.courbure_bouche) < 0.05 and tr.ouverture_bouche < 0.2:
+            c.create_line(cx - largeur_bouche * 0.5, by, cx + largeur_bouche * 0.5, by,
+                         fill=tr.couleur, width=2, capstyle=tk.ROUND)
+        else:
+            depart = 200 if tr.courbure_bouche >= 0 else 20
+            etendue = 140
+            style = tk.ARC if tr.ouverture_bouche < 0.3 else tk.CHORD
+            c.create_arc(cx - largeur_bouche * 0.5, by - hauteur_bouche * (1 if tr.courbure_bouche >= 0 else -1),
+                        cx + largeur_bouche * 0.5, by + hauteur_bouche * (1 if tr.courbure_bouche >= 0 else -1),
+                        start=depart, extent=etendue, style=style,
+                        outline=tr.couleur, width=2)
+
+
+class ShionInteractionDetector:
+    """§8 : réaction au curseur. Lié aux événements natifs Tk du Canvas
+    (Enter/Leave/Motion) -- pas de polling ni de calcul de distance à
+    chaque frame, le Canvas sait déjà nous dire quand le curseur entre ou
+    sort de sa zone."""
+
+    _SURVOL_LONG_S = 1.2
+
+    def __init__(self, canvas: tk.Canvas, bus: EventBus):
+        self._canvas = canvas
+        self._bus = bus
+        self._survol_depuis: Optional[float] = None
+        self._apres_id: Optional[str] = None
+        canvas.bind("<Enter>", self._survole)
+        canvas.bind("<Leave>", self._quitte)
+
+    def _survole(self, _event=None) -> None:
+        self._survol_depuis = time.time()
+        self._bus.emit("CURSOR_NEAR")
+        self._apres_id = self._canvas.after(int(self._SURVOL_LONG_S * 1000), self._verifier_survol_long)
+
+    def _verifier_survol_long(self) -> None:
+        if self._survol_depuis is not None:
+            self._bus.emit("CURSOR_HOVER_LONG")
+
+    def _quitte(self, _event=None) -> None:
+        self._survol_depuis = None
+        if self._apres_id is not None:
+            try:
+                self._canvas.after_cancel(self._apres_id)
+            except tk.TclError:
+                pass
+            self._apres_id = None
+        self._bus.emit("CURSOR_LEAVE")
+
+
+class ShionBehaviorController:
+    """§9/§10 : traduit un événement applicatif en demande d'état. Table
+    de correspondance délibérément SIMPLE (§24) -- c'est la couche que la
+    demande d'origine identifie explicitement comme devant pouvoir être
+    remplacée plus tard par quelque chose de plus intelligent (contexte
+    de conversation, historique...) SANS toucher au reste de l'avatar :
+    tout ce qu'un remplaçant doit faire, c'est appeler
+    controleur.demander_etat(...) depuis un abonnement à l'EventBus,
+    exactement comme celle-ci."""
+
+    _CORRESPONDANCE: Dict[str, AvatarState] = {
+        "USER_MESSAGE_SENT": AvatarState.THINKING,
+        "USER_MESSAGE_RECEIVED": AvatarState.HAPPY,
+        "TASK_STARTED": AvatarState.FOCUSED,
+        "TASK_COMPLETED": AvatarState.SUCCESS,
+        "TASK_FAILED": AvatarState.CONFUSED,
+        "CODE_EXECUTED": AvatarState.FOCUSED,
+        "CODE_FAILED": AvatarState.CONFUSED,
+        "ERROR_OCCURRED": AvatarState.SURPRISED,
+        "FILE_OPENED": AvatarState.CURIOUS,
+        "FILE_SAVED": AvatarState.HAPPY,
+        "SEARCH_STARTED": AvatarState.FOCUSED,
+        "SEARCH_COMPLETED": AvatarState.IDLE,
+        "CURSOR_NEAR": AvatarState.CURIOUS,
+        "CURSOR_LEAVE": AvatarState.IDLE,
+    }
+
+    # §14 : les animations spontanées / réactions au curseur ne doivent
+    # JAMAIS interrompre une interaction sérieuse en cours.
+    _PROTEGES = frozenset({
+        AvatarState.THINKING, AvatarState.PROCESSING, AvatarState.ERROR,
+    })
+    _EVENEMENTS_CURSEUR = frozenset({"CURSOR_NEAR", "CURSOR_LEAVE", "CURSOR_HOVER_LONG"})
+
+    def __init__(self, bus: EventBus, controleur: ShionEmotionController):
+        self._bus = bus
+        self._controleur = controleur
+        for evenement in self._CORRESPONDANCE:
+            bus.on(evenement, self._sur_evenement_fabrique(evenement))
+        bus.on("ERROR_OCCURRED", self._sur_erreur)  # §10 : SURPRISED puis CONFUSED
+        bus.on("SET_EMOTION", self._sur_emotion_explicite)
+
+    def _sur_evenement_fabrique(self, evenement: str):
+        def _gerer(**_donnees):
+            if evenement in self._EVENEMENTS_CURSEUR and self._controleur.etat in self._PROTEGES:
+                return  # §14 : ne perturbe pas une interaction sérieuse en cours
+            self._controleur.demander_etat(self._CORRESPONDANCE[evenement])
+        return _gerer
+
+    def _sur_erreur(self, **_donnees) -> None:
+        def _puis_confus():
+            if self._controleur.etat == AvatarState.SURPRISED:
+                self._controleur.demander_etat(AvatarState.CONFUSED)
+        self._controleur.demander_etat(AvatarState.SURPRISED)
+        try:
+            self._bus_root_after(900, _puis_confus)
+        except Exception:
+            pass
+
+    def _bus_root_after(self, delai_ms: int, fn) -> None:
+        # Petit détour : ShionBehaviorController ne connaît pas root
+        # directement (pas de couplage à l'IDE, voir docstring EventBus),
+        # mais a besoin d'un after() pour enchaîner SURPRISED -> CONFUSED
+        # sans bloquer. On passe par le canvas du renderer si possible ;
+        # à défaut (mode debug/tests sans renderer), l'enchaînement est
+        # simplement sauté -- SURPRISED retombera à IDLE via son propre
+        # duree_defaut_s, ce qui reste un comportement correct.
+        widget = getattr(self, "_widget_after", None)
+        if widget is not None:
+            widget.after(delai_ms, fn)
+
+    def _sur_emotion_explicite(self, etat: Optional[AvatarState] = None,
+                               forcer: bool = False, **_ignore) -> None:
+        if etat is not None:
+            self._controleur.demander_etat(etat, forcer=forcer)
+
+
+class ShionAvatar:
+    """Façade publique du système (§16). C'est le SEUL point d'entrée que
+    le reste de l'application doit connaître :
+
+        avatar.set_emotion("CURIOUS")
+        avatar.react("TASK_COMPLETED")
+        avatar.play("THINKING")             # alias de set_emotion
+        avatar.reset()
+        avatar.set_intensity(0.8)
+        avatar.set_enabled(True)
+
+    Conserve le logo existant (anneau + point) comme état IDLE par
+    défaut plutôt que de le remplacer par un design différent (§21) --
+    seule la taille du Canvas est agrandie (30px -> ~56px) pour que les
+    yeux/bouche restent lisibles, voir _build_colonne_shion."""
+
+    def __init__(self, canvas: tk.Canvas, config: Optional[ShionAvatarConfig] = None):
+        self.config = config or ShionAvatarConfig()
+        self.bus = EventBus()
+        self._controleur = ShionEmotionController()
+        self._animation = ShionAnimationController(self._controleur, self.config)
+        self.renderer = ShionAvatarRenderer(canvas, self._animation, self.config,
+                                            taille=int(canvas["width"]))
+        self._interaction = ShionInteractionDetector(canvas, self.bus) if self.config.cursor_tracking else None
+        self._comportement = ShionBehaviorController(self.bus, self._controleur)
+        self._comportement._widget_after = canvas
+        self._debug_fenetre: Optional[tk.Toplevel] = None
+        self._debug_apres_id: Optional[str] = None
+        if self.config.debug:
+            self.ouvrir_debug(canvas.winfo_toplevel())
+
+    # -- API publique (§16) -----------------------------------------------
+
+    def set_emotion(self, nom_etat: str, forcer: bool = False) -> bool:
+        try:
+            etat = AvatarState(nom_etat)
+        except ValueError:
+            return False
+        return self._controleur.demander_etat(etat, forcer=forcer)
+
+    def play(self, nom_etat: str) -> bool:
+        return self.set_emotion(nom_etat, forcer=True)
+
+    def react(self, evenement: str, **donnees) -> None:
+        self.bus.emit(evenement, **donnees)
+
+    def reset(self) -> None:
+        self._controleur.demander_etat(AvatarState.IDLE, forcer=True)
+
+    def set_intensity(self, valeur: float) -> None:
+        self.config.idle_intensity = max(0.0, min(1.0, valeur))
+
+    def set_enabled(self, actif: bool) -> None:
+        self.renderer._actif = actif
+        if actif:
+            self.renderer.demarrer()
+
+    def demarrer(self) -> None:
+        self.renderer.demarrer()
+
+    def arreter(self) -> None:
+        """Arrête proprement la boucle d'animation -- à appeler à la
+        fermeture de l'IDE pour ne laisser aucun root.after() en
+        attente sur un widget détruit (§18, "listeners non nettoyés")."""
+        self.renderer.arreter()
+        if self._debug_apres_id is not None and self._debug_fenetre is not None:
+            try:
+                self._debug_fenetre.after_cancel(self._debug_apres_id)
+            except tk.TclError:
+                pass
+
+    # -- mode debug (§17) ---------------------------------------------------
+
+    def ouvrir_debug(self, parent: tk.Misc) -> None:
+        if self._debug_fenetre is not None and self._debug_fenetre.winfo_exists():
+            self._debug_fenetre.lift()
+            return
+        fen = tk.Toplevel(parent)
+        fen.title("SHION Avatar — Debug")
+        fen.configure(bg=T.PANNEAU)
+        fen.geometry("340x420")
+        self._debug_fenetre = fen
+
+        etiquette_etat = tk.Label(fen, justify=tk.LEFT, anchor="w", bg=T.PANNEAU,
+                                  fg=T.TEXTE, font=("Consolas", 9))
+        etiquette_etat.pack(fill=tk.X, padx=10, pady=10)
+
+        def _rafraichir():
+            if not fen.winfo_exists():
+                return
+            d = self._controleur.definition()
+            etiquette_etat.config(text=(
+                "État courant   : %s\n"
+                "État précédent  : %s\n"
+                "Priorité        : %d\n"
+                "Depuis          : %.1fs\n"
+                "Durée min       : %.1fs\n"
+                "Durée par défaut: %s\n"
+                "Intensité idle  : %.2f\n"
+                "Suivi curseur   : %s\n"
+                "Spontané        : %s"
+            ) % (
+                self._controleur.etat.value, self._controleur.etat_precedent.value,
+                d.priorite, self._controleur.temps_dans_etat(), d.duree_min_s,
+                "∞" if d.duree_defaut_s is None else "%.1fs" % d.duree_defaut_s,
+                self.config.idle_intensity, self.config.cursor_tracking,
+                self.config.spontaneous_behavior,
+            ))
+            self._debug_apres_id = fen.after(200, _rafraichir)
+
+        grille = tk.Frame(fen, bg=T.PANNEAU)
+        grille.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        etats_testables = (
+            AvatarState.IDLE, AvatarState.CURIOUS, AvatarState.SURPRISED,
+            AvatarState.HAPPY, AvatarState.EXCITED, AvatarState.FOCUSED,
+            AvatarState.THINKING, AvatarState.CONFUSED, AvatarState.ANGRY,
+            AvatarState.SAD, AvatarState.SLEEPY, AvatarState.PROCESSING,
+            AvatarState.SUCCESS, AvatarState.ERROR,
+        )
+        for i, etat in enumerate(etats_testables):
+            btn = tk.Button(grille, text=etat.value, bg=T.PANNEAU_HAUT, fg=T.CYAN,
+                            activebackground=T.BORDURE, relief=tk.FLAT,
+                            font=("Consolas", 8, "bold"), cursor="hand2",
+                            command=lambda e=etat: self.play(e.value))
+            btn.grid(row=i // 2, column=i % 2, sticky="nsew", padx=3, pady=3)
+        grille.columnconfigure(0, weight=1)
+        grille.columnconfigure(1, weight=1)
+
+        _rafraichir()
+
+
+# ==============================================================================
+# INTERNATIONALISATION DE L'INTERFACE (pas du langage UVI ni des messages
+# produits PENDANT l'exécution d'un script -- voir la portée exacte
+# ci-dessous).
+#
+# Clé = texte SOURCE en français, tel qu'écrit ailleurs dans ce fichier --
+# pas un identifiant abstrait séparé (pas de "PARAMS_TITLE" à maintenir
+# en plus du code). UVIIDE._t(texte) traduit vers self.langue ; l'absence
+# d'entrée pour une clé, ou langue == "fr", retombe TOUJOURS proprement
+# sur le texte français d'origine (jamais de clé brute affichée).
+#
+# PORTÉE ASSUMÉE, DITE EXPLICITEMENT : couvre le CHROME de l'interface
+# (rail, onglets, barre d'outils, titres de panneaux, PARAMÈTRES) --
+# c'est ce qu'un utilisateur veut dire par « changer la langue de
+# l'IDE ». NE COUVRE PAS les milliers de messages générés PENDANT
+# l'exécution d'un script (logs, erreurs UVIError, sorties de !) : ces
+# textes sont produits par le MOTEUR (UVIEvaluator/UVIVirtualMachine),
+# pas par l'IDE, et les traduire tous aurait exigé de toucher des
+# centaines de sites d'émission d'erreur à travers tout le fichier --
+# un chantier séparé, bien plus large que « changer la langue de
+# l'interface », hors de portée ici. Ce que l'utilisateur ÉCRIT (le
+# langage UVI lui-même) n'est de toute façon pas concerné : ~/%/DEF/CALL
+# etc. restent des mots-clés fixes, indépendants de la langue de l'IDE.
+LANGUES = {
+    "en": "English",
+    "fr": "Français",
+    "es": "Español",
+    "zh": "中文",
+    "hi": "हिन्दी",
+}
+
+TRANSLATIONS = {
+    # --- rail + titres de panneaux (colonne gauche) -----------------------
+    "EXPLORER":  {"en": "EXPLORER",   "es": "EXPLORADOR",   "zh": "资源管理器", "hi": "एक्सप्लोरर"},
+    "EXPLORATEUR UVI": {"en": "UVI EXPLORER", "es": "EXPLORADOR UVI", "zh": "UVI 资源管理器", "hi": "UVI एक्सप्लोरर"},
+    "RECHERCHE": {"en": "SEARCH",     "es": "BUSCAR",        "zh": "搜索",       "hi": "खोजें"},
+    "VARIABLES": {"en": "VARIABLES",  "es": "VARIABLES",     "zh": "变量",       "hi": "चर"},
+    "OUTILS":    {"en": "TOOLS",      "es": "HERRAMIENTAS",  "zh": "工具",       "hi": "उपकरण"},
+    "MODULES":   {"en": "MODULES",    "es": "MÓDULOS",       "zh": "模块",       "hi": "मॉड्यूल"},
+    "MODULES & PAQUETS": {"en": "MODULES & PACKAGES", "es": "MÓDULOS Y PAQUETES", "zh": "模块与包", "hi": "मॉड्यूल और पैकेज"},
+    "INSPECTEUR DE VARIABLES": {"en": "VARIABLE INSPECTOR", "es": "INSPECTOR DE VARIABLES", "zh": "变量检查器", "hi": "चर निरीक्षक"},
+    "OUTILS UVI": {"en": "UVI TOOLS", "es": "HERRAMIENTAS UVI", "zh": "UVI 工具", "hi": "UVI उपकरण"},
+    "TESTS":     {"en": "TESTS",      "es": "PRUEBAS",       "zh": "测试",       "hi": "परीक्षण"},
+    "PARAMÈTRES": {"en": "SETTINGS",  "es": "AJUSTES",       "zh": "设置",       "hi": "सेटिंग्स"},
+
+    # --- onglets de la console (dock inférieur) ----------------------------
+    "CONSOLE UVI": {"en": "UVI CONSOLE", "es": "CONSOLA UVI", "zh": "UVI 控制台", "hi": "UVI कंसोल"},
+    "SORTIE":      {"en": "OUTPUT",      "es": "SALIDA",      "zh": "输出",       "hi": "आउटपुट"},
+    "ERREURS":     {"en": "ERRORS",      "es": "ERRORES",     "zh": "错误",       "hi": "त्रुटियाँ"},
+    "TERMINAL":    {"en": "TERMINAL",    "es": "TERMINAL",    "zh": "终端",       "hi": "टर्मिनल"},
+    "DÉBOGUEUR":   {"en": "DEBUGGER",    "es": "DEPURADOR",   "zh": "调试器",     "hi": "डिबगर"},
+    "AGENT":       {"en": "AGENT",       "es": "AGENTE",      "zh": "代理",       "hi": "एजेंट"},
+    "CONSOLE":     {"en": "CONSOLE",     "es": "CONSOLA",     "zh": "控制台",     "hi": "कंसोल"},
+
+    # --- onglets de l'espace de travail central -----------------------------
+    "◧ ÉDITEUR": {"en": "◧ EDITOR", "es": "◧ EDITOR", "zh": "◧ 编辑器", "hi": "◧ संपादक"},
+    "▦ CANEVAS": {"en": "▦ CANVAS", "es": "▦ LIENZO", "zh": "▦ 画布",   "hi": "▦ कैनवस"},
+
+    # --- barre d'outils supérieure ------------------------------------------
+    "NOUVEAU":      {"en": "NEW",        "es": "NUEVO",        "zh": "新建",     "hi": "नया"},
+    "OUVRIR":       {"en": "OPEN",       "es": "ABRIR",        "zh": "打开",     "hi": "खोलें"},
+    "SAUVEGARDER":  {"en": "SAVE",       "es": "GUARDAR",      "zh": "保存",     "hi": "सहेजें"},
+    "▶  EXÉCUTER":  {"en": "▶  RUN",     "es": "▶  EJECUTAR",  "zh": "▶  运行",  "hi": "▶  चलाएँ"},
+    "⏹  ARRÊTER":   {"en": "⏹  STOP",    "es": "⏹  DETENER",   "zh": "⏹  停止",  "hi": "⏹  रोकें"},
+    "DÉBOGUEUR_BTN": {"en": "DEBUGGER", "es": "DEPURADOR", "zh": "调试器", "hi": "डिबगर"},
+    "AUTO-CORRIGER": {"en": "AUTO-FIX", "es": "AUTOCORREGIR", "zh": "自动修复", "hi": "स्वतः सुधार"},
+
+    # --- PARAMÈTRES : titres de cartes --------------------------------------
+    "SERVEUR SHION": {"en": "SHION SERVER", "es": "SERVIDOR SHION", "zh": "SHION 服务器", "hi": "SHION सर्वर"},
+    "MODÈLE LOCAL (llama.cpp, CPU)": {
+        "en": "LOCAL MODEL (llama.cpp, CPU)", "es": "MODELO LOCAL (llama.cpp, CPU)",
+        "zh": "本地模型（llama.cpp，CPU）", "hi": "स्थानीय मॉडल (llama.cpp, CPU)"},
+    "RAPPORTS DE BUGS": {"en": "BUG REPORTS", "es": "INFORMES DE ERRORES", "zh": "错误报告", "hi": "बग रिपोर्ट"},
+    "ÉTAT DU SYSTÈME": {"en": "SYSTEM STATUS", "es": "ESTADO DEL SISTEMA", "zh": "系统状态", "hi": "सिस्टम स्थिति"},
+    "LANGUE": {"en": "LANGUAGE", "es": "IDIOMA", "zh": "语言", "hi": "भाषा"},
+
+    # --- PARAMÈTRES : champs et boutons -------------------------------------
+    "Adresse du serveur": {"en": "Server address", "es": "Dirección del servidor",
+                            "zh": "服务器地址", "hi": "सर्वर पता"},
+    "Nom du modèle": {"en": "Model name", "es": "Nombre del modelo",
+                       "zh": "模型名称", "hi": "मॉडल नाम"},
+    "Clé d'API": {"en": "API key", "es": "Clave de API", "zh": "API 密钥", "hi": "एपीआई कुंजी"},
+    "Température": {"en": "Temperature", "es": "Temperatura", "zh": "温度", "hi": "तापमान"},
+    "Budget de tokens": {"en": "Token budget", "es": "Presupuesto de tokens",
+                          "zh": "令牌预算", "hi": "टोकन बजट"},
+    "Appliquer": {"en": "Apply", "es": "Aplicar", "zh": "应用", "hi": "लागू करें"},
+    "Tester": {"en": "Test", "es": "Probar", "zh": "测试", "hi": "जाँचें"},
+    "Arrêter": {"en": "Stop", "es": "Detener", "zh": "停止", "hi": "रोकें"},
+    "Ouvrir le dossier": {"en": "Open folder", "es": "Abrir carpeta",
+                           "zh": "打开文件夹", "hi": "फ़ोल्डर खोलें"},
+
+    # --- titre de fenêtre -----------------------------------------------
+    "UVI OS v9.0.0 — UNIVERSE · VISION · INTELLIGENCE": {
+        "en": "UVI OS v9.0.0 — UNIVERSE · VISION · INTELLIGENCE",
+        "es": "UVI OS v9.0.0 — UNIVERSO · VISIÓN · INTELIGENCIA",
+        "zh": "UVI OS v9.0.0 — 宇宙 · 视野 · 智能",
+        "hi": "UVI OS v9.0.0 — ब्रह्मांड · दृष्टि · बुद्धिमत्ता",
+    },
+
+    # --- compte / abonnement (voir docs/COMPTES_ABONNEMENTS.md) ------------
+    "Se connecter avec Google": {
+        "en": "Sign in with Google", "es": "Iniciar sesión con Google",
+        "zh": "使用 Google 登录", "hi": "Google से साइन इन करें"},
+    "Se connecter": {"en": "Sign in", "es": "Iniciar sesión", "zh": "登录", "hi": "साइन इन करें"},
+    "Se déconnecter": {"en": "Sign out", "es": "Cerrar sesión", "zh": "退出登录", "hi": "साइन आउट करें"},
+    "Non connecté": {"en": "Not signed in", "es": "No conectado", "zh": "未登录", "hi": "साइन इन नहीं है"},
+    "Connexion UVI": {"en": "UVI sign-in", "es": "Conexión UVI", "zh": "UVI 登录", "hi": "UVI साइन-इन"},
+    "Un compte UVI est nécessaire pour utiliser UVI.": {
+        "en": "A UVI account is required to use UVI.",
+        "es": "Se requiere una cuenta UVI para usar UVI.",
+        "zh": "使用 UVI 需要一个 UVI 账户。",
+        "hi": "UVI का उपयोग करने के लिए UVI खाता आवश्यक है।"},
+    "Ouverture du navigateur pour la connexion Google...": {
+        "en": "Opening browser for Google sign-in...",
+        "es": "Abriendo el navegador para iniciar sesión con Google...",
+        "zh": "正在打开浏览器以进行 Google 登录…",
+        "hi": "Google साइन-इन के लिए ब्राउज़र खोला जा रहा है..."},
+    "Déconnecté.": {"en": "Signed out.", "es": "Sesión cerrada.", "zh": "已退出登录。", "hi": "साइन आउट हो गया।"},
+}
+# ==============================================================================
+
+
 class UVIIDE:
     def __init__(self):
+        # Langue de l'interface (voir TRANSLATIONS/_t/_tr plus haut) --
+        # chargée AVANT toute construction de widget, puisque _tr() lit
+        # self.langue au moment même où chaque widget traduisible est créé.
+        # "en" par défaut si aucune préférence sauvegardée -- demande
+        # explicite (l'anglais est la langue par défaut, pas le français
+        # dans lequel ce fichier est écrit).
+        self._widgets_traduits = []
+        self.langue = self._charger_langue_sauvegardee()
         self.vfs = VFSManager()
         # Système de paquets (ajout de cette session) : attaché à self.vfs
         # APRÈS construction plutôt qu'ajouté au constructeur de
@@ -9033,6 +10303,12 @@ class UVIIDE:
         # Le tester après aurait été un faux négatif permanent -- personne
         # n'aurait jamais vu le message d'accueil.
         premier_lancement = not self.vfs.list_files()
+        # Serveur llama.cpp local (server/serve_llamacpp.py) lancé DEPUIS
+        # l'IDE -- voir _definir_modele_local. None tant qu'aucun préréglage
+        # n'a été démarré depuis ce panneau (un serveur lancé à la main
+        # dans un terminal externe n'apparaît pas ici, par construction).
+        self._processus_llm_local: Optional[subprocess.Popen] = None
+        self._preset_llm_local_actif: Optional[str] = None
         self._build_window()
         self.input_var = tk.StringVar()
         self._build_ui()
@@ -9041,6 +10317,12 @@ class UVIIDE:
         self.agent.think_and_act()
         if premier_lancement:
             self._afficher_accueil()
+        # Porte de connexion (voir docs/COMPTES_ABONNEMENTS.md) -- APRÈS
+        # _build_ui() : _poster_ui/_pomper_file_ui (démarré en fin de
+        # _build_ui) doivent déjà tourner pour que le thread de connexion
+        # puisse faire remonter son statut vers ce dialogue. No-op complet
+        # si uvi_auth.is_configured() est faux.
+        self._gate_connexion_obligatoire()
 
     def _afficher_accueil(self):
         """Message d'accueil du tout premier lancement (étape 7.1).
@@ -9101,8 +10383,304 @@ class UVIIDE:
         self._conseils_vus.add(cle)
         self.log(message, "sys")
 
+    # ------------------------------------------------------------------
+    # Internationalisation de l'interface (voir TRANSLATIONS plus haut
+    # pour la portée exacte -- le chrome de l'IDE, pas les messages émis
+    # PENDANT l'exécution d'un script).
+    # ------------------------------------------------------------------
+    _FICHIER_PREFS = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".uvi_prefs.json")
+
+    def _charger_langue_sauvegardee(self) -> str:
+        try:
+            with open(self._FICHIER_PREFS, "r", encoding="utf-8") as f:
+                code = json.load(f).get("langue")
+            if code in LANGUES:
+                return code
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+        return "en"
+
+    def _sauvegarder_prefs_langue(self) -> None:
+        # BUGFIX : json.dump({"langue": ...}) écrasait TOUT le fichier --
+        # correct tant que "langue" était l'unique clé de .uvi_prefs.json,
+        # mais uvi_auth.save_session() y écrit désormais aussi une clé
+        # "auth" (session de connexion). Changer de langue effaçait donc
+        # silencieusement la session de quiconque était connecté. On lit
+        # le contenu existant et on ne touche que la clé "langue" --
+        # même correctif que celui déjà appliqué à _safe_store ailleurs
+        # dans ce fichier pour ne jamais écraser un état qu'on ne
+        # possède pas.
+        donnees = {}
+        try:
+            with open(self._FICHIER_PREFS, "r", encoding="utf-8") as f:
+                lu = json.load(f)
+                if isinstance(lu, dict):
+                    donnees = lu
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+        donnees["langue"] = self.langue
+        try:
+            with open(self._FICHIER_PREFS, "w", encoding="utf-8") as f:
+                json.dump(donnees, f, ensure_ascii=False)
+        except OSError:
+            pass  # préférence non persistée -- pas fatal, juste pas mémorisée
+
+    def _t(self, texte: str) -> str:
+        """Traduit `texte` (le texte SOURCE en français, pas une clé
+        abstraite séparée) vers self.langue. Retombe TOUJOURS sur `texte`
+        inchangé si aucune traduction n'existe pour cette clé+langue --
+        couvre nativement le français (langue source, aucune entrée à
+        maintenir pour elle) et dégrade proprement une clé oubliée en
+        français plutôt qu'en identifiant brut illisible."""
+        return TRANSLATIONS.get(texte, {}).get(self.langue, texte)
+
+    def _tr(self, widget, texte_source: str, option: str = "text"):
+        """Enregistre `widget` comme traduisible sous la clé `texte_source`
+        (voir _t) et applique IMMÉDIATEMENT la traduction pour self.langue.
+        Appelée à la CONSTRUCTION de chaque widget de chrome qu'on veut
+        voir changer de langue sans redémarrer l'IDE -- _appliquer_langue
+        rejoue ensuite le registre à chaque changement. Retourne `widget`
+        (permet de chaîner : self._tr(tk.Label(...), "X").pack())."""
+        def _rafraichir():
+            try:
+                widget.config(**{option: self._t(texte_source)})
+            except tk.TclError:
+                pass  # widget détruit entre-temps (panneau reconstruit)
+        self._widgets_traduits.append(_rafraichir)
+        _rafraichir()
+        return widget
+
+    def _tr_personnalise(self, rafraichir_fn):
+        """Variante de _tr pour un widget dont le texte affiché n'est PAS
+        directement _t(texte_source) tel quel -- ex. _bouton_plat, qui
+        compose icône + texte en une seule chaîne. `rafraichir_fn` est un
+        callable SANS argument qui réapplique lui-même le texte correct
+        pour self.langue à chaque appel ; enregistré dans le même registre
+        que _tr, rejoué de la même façon par _appliquer_langue."""
+        self._widgets_traduits.append(rafraichir_fn)
+        rafraichir_fn()
+
+    # ------------------------------------------------------------------
+    # Connexion Google et niveau d'abonnement (voir uvi_auth.py et
+    # docs/COMPTES_ABONNEMENTS.md). No-op complet tant que
+    # uvi_auth.is_configured() est faux -- comportement de développement
+    # local historique, inchangé (self.badge_compte reste None).
+    # ------------------------------------------------------------------
+    def _rafraichir_badge_compte(self) -> None:
+        if self.badge_compte is None:
+            return
+        session = uvi_auth.current_session()
+        if session is None:
+            self.lbl_compte.config(text=self._t("Non connecté"))
+            self.btn_compte.config(text=self._t("Se connecter"), command=self._sur_clic_connexion)
+        else:
+            niveau = str(session.get("tier", "free")).upper()
+            self.lbl_compte.config(text="%s · %s" % (session.get("email", "?"), niveau))
+            self.btn_compte.config(text=self._t("Se déconnecter"), command=self._sur_clic_deconnexion)
+
+    def _sur_clic_connexion(self) -> None:
+        self._afficher_dialogue_connexion(bloquant=False)
+
+    def _sur_clic_deconnexion(self) -> None:
+        uvi_auth.logout()
+        self.engine._shion_clients_par_niveau.clear()
+        self._rafraichir_badge_compte()
+        self._set_status(self._t("Déconnecté."))
+
+    def _apres_connexion(self) -> None:
+        self.engine._shion_clients_par_niveau.clear()
+        self._rafraichir_badge_compte()
+        self._set_status("Prêt.")
+
+    def _afficher_dialogue_connexion(self, bloquant: bool) -> None:
+        """Fenêtre de connexion Google.
+
+        `bloquant=True` : porte d'entrée obligatoire au démarrage (voir
+        _gate_connexion_obligatoire) -- fermer la fenêtre sans se connecter
+        ferme l'IDE (os._exit, pas self.root.destroy : la fenêtre principale
+        n'a pas fini de se construire à ce stade, la détruire proprement
+        n'apporterait rien puisqu'aucun travail utilisateur n'existe encore).
+
+        `bloquant=False` : ouverte depuis le badge de compte, fermable
+        normalement -- l'IDE reste utilisable sans connexion, seul
+        SHION.ASK restera verrouillé (voir _resoudre_client_shion)."""
+        fenetre = tk.Toplevel(self.root)
+        fenetre.title(self._t("Connexion UVI"))
+        fenetre.resizable(False, False)
+        fenetre.configure(bg=T.PANNEAU)
+        fenetre.transient(self.root)
+        fenetre.grab_set()
+        if bloquant:
+            fenetre.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
+
+        tk.Label(fenetre, bg=T.PANNEAU, fg=T.TEXTE_FORT, padx=28, pady=(24, 6),
+                 font=("Segoe UI", 10), wraplength=320,
+                 text=self._t("Un compte UVI est nécessaire pour utiliser UVI.")).pack()
+        statut_var = tk.StringVar(value="")
+        tk.Label(fenetre, textvariable=statut_var, bg=T.PANNEAU, fg=T.TEXTE_FAIBLE,
+                 padx=28, wraplength=320).pack()
+
+        def lancer_connexion():
+            bouton.config(state=tk.DISABLED)
+            statut_var.set(self._t("Ouverture du navigateur pour la connexion Google..."))
+
+            def travail():
+                try:
+                    uvi_auth.start_google_login(
+                        on_status=lambda m: self._poster_ui(lambda: statut_var.set(m)))
+                except uvi_auth.UviAuthError as e:
+                    message = str(e)
+                    self._poster_ui(lambda: (statut_var.set(message), bouton.config(state=tk.NORMAL)))
+                    return
+                self._poster_ui(lambda: (fenetre.destroy(), self._apres_connexion()))
+
+            threading.Thread(target=travail, daemon=True).start()
+
+        bouton = tk.Button(
+            fenetre, text=self._t("Se connecter avec Google"), command=lancer_connexion,
+            relief=tk.FLAT, bd=0, bg=T.BLEU, fg="white", font=("Segoe UI", 10, "bold"),
+            cursor="hand2", padx=18, pady=10,
+        )
+        bouton.pack(pady=18)
+
+        if bloquant:
+            self.root.wait_window(fenetre)
+
+    def _gate_connexion_obligatoire(self) -> None:
+        """Si uvi_auth est configuré (docs/COMPTES_ABONNEMENTS.md) et
+        qu'aucune session locale n'existe, bloque l'IDE derrière l'écran de
+        connexion avant de rendre la main -- « avant d'utiliser UVI, chaque
+        utilisateur doit se connecter », pas seulement pour SHION.ASK.
+        No-op complet si uvi_auth n'est pas configuré (développement
+        local, comportement historique)."""
+        if not uvi_auth.is_configured():
+            return
+        if uvi_auth.current_session() is not None:
+            return
+        self._afficher_dialogue_connexion(bloquant=True)
+
+    def _appliquer_langue(self, code: str):
+        """Change la langue de l'interface EN DIRECT (sans redémarrage) --
+        rejoue le registre rempli par _tr()/_tr_personnalise(), puis les
+        cas particuliers qui n'y tiennent pas du tout (voir
+        _retraduire_cas_speciaux)."""
+        if code not in LANGUES or code == self.langue:
+            return
+        self.langue = code
+        for rafraichir in self._widgets_traduits:
+            try:
+                rafraichir()
+            except tk.TclError:
+                pass  # widget détruit entre-temps (panneau reconstruit) -- ignoré
+        self._retraduire_cas_speciaux()
+        self._sauvegarder_prefs_langue()
+
+    def _retraduire_cas_speciaux(self):
+        """Widgets dont le texte dépend de PLUS que la langue (l'état
+        d'exécution, l'état replié/déplié du dock...) -- pas de simple
+        entrée de registre possible pour eux, _appliquer_langue les
+        rafraîchit explicitement après avoir traité le registre."""
+        if hasattr(self, "btn_run"):
+            self._mode_execution(self.engine.is_running)
+        if hasattr(self, "btn_basculer_dock"):
+            prefixe = "▾ " if getattr(self, "_dock_ouvert", True) else "▴ "
+            self.btn_basculer_dock.config(text=prefixe + self._t("CONSOLE"))
+        if hasattr(self, "titre_colonne_gauche") and getattr(self, "_panneau_gauche_actif", None):
+            self.titre_colonne_gauche.config(text=self._t(
+                self._TITRES_PANNEAUX.get(self._panneau_gauche_actif,
+                                          self._panneau_gauche_actif.upper())))
+        self._rafraichir_boutons_langue()
+        try:
+            self.root.title(self._t(
+                "UVI OS v9.0.0 — UNIVERSE · VISION · INTELLIGENCE"))
+        except tk.TclError:
+            pass
+
+    def _changer_langue_parametres(self, code: str):
+        """Clic sur un bouton de langue dans PARAMÈTRES (voir
+        _build_panneau_parametres) -- change la langue de toute
+        l'interface EN DIRECT, sans redémarrage."""
+        self._appliquer_langue(code)
+
+    def _rafraichir_boutons_langue(self):
+        """Met en évidence le bouton de la langue ACTIVE dans la carte
+        LANGUE de PARAMÈTRES (même principe que la mise en évidence de
+        l'onglet actif du rail, voir afficher_panneau_gauche) -- séparée
+        de _changer_langue_parametres pour être aussi appelable depuis
+        _retraduire_cas_speciaux (ex. langue changée par un autre moyen
+        que ces boutons eux-mêmes, pour rester cohérent dans tous les cas)."""
+        for code, bouton in getattr(self, "_boutons_langue", {}).items():
+            try:
+                bouton.config(bg=T.SURVOL if code == self.langue else T.PANNEAU)
+            except tk.TclError:
+                pass
+
+    def _on_uncaught_exception(self, exc_type, exc_value, exc_tb):
+        """Point d'accroche Tkinter (self.root.report_callback_exception,
+        voir son branchement juste après la création de self.root
+        ci-dessous) -- appelé pour TOUTE exception levée dans un callback
+        lié au mainloop (clic de bouton, raccourci clavier, etc.) qui n'a
+        pas déjà son propre try/except. Sans ce point d'accroche, Tkinter
+        se contente par défaut d'imprimer la trace sur stderr et de
+        continuer -- invisible dans une app fenêtrée lancée sans console,
+        l'utilisateur ne voit alors RIEN se passer d'autre qu'un clic sans
+        effet. On journalise dans la console UVI (visible) ET on signale
+        au système de rapports de bugs (bug_reports.py -- jamais de code
+        utilisateur dedans, voir sa docstring), sans jamais laisser
+        l'exception remonter plus loin : report_callback_exception ne
+        doit elle-même jamais lever, sous peine de faire planter le
+        mainloop Tk tout entier."""
+        try:
+            _signaler_crash(exc_value, source="tkinter_callback")
+            self.log(f"Erreur interne inattendue ({exc_type.__name__}) — "
+                     "un rapport anonymisé (sans code) a été enregistré "
+                     "localement, voir PARAMÈTRES.", "err")
+        except Exception:
+            pass
+
+    def _on_uncaught_thread_exception(self, args):
+        """threading.excepthook (branché ci-dessous) -- filet pour les
+        threads daemon qui n'ont pas déjà leur propre try/except (ceux
+        qui en ont un, ex. run_script_vm._run, appellent déjà
+        _signaler_crash directement et n'atteignent jamais ce point).
+        Sans ce filet, un thread qui lève silencieusement ne fait
+        qu'imprimer sur stderr et mourir -- invisible, et le script
+        semble juste s'être arrêté sans raison."""
+        try:
+            _signaler_crash(args.exc_value, source="thread")
+        except Exception:
+            pass
+        # Rappelle TOUJOURS le comportement par défaut : ce point
+        # d'accroche AJOUTE la capture, il ne la remplace pas -- la trace
+        # reste imprimée sur stderr comme avant, utile en développement.
+        threading.__excepthook__(args)
+
+    def _on_uncaught_main_exception(self, exc_type, exc_value, exc_tb):
+        """sys.excepthook (branché ci-dessous) -- filet pour le thread
+        principal EN DEHORS du mainloop Tk (celui-ci passe par
+        report_callback_exception, pas par ici) : essentiellement la
+        fenêtre de code entre la fin de __init__ et root.mainloop(), et
+        tout code qui tournerait après root.destroy()."""
+        try:
+            _signaler_crash(exc_value, source="main")
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
     def _build_window(self):
         self.root = tk.Tk()
+        # Trois filets d'exception COMPLÉMENTAIRES (jamais redondants) :
+        # report_callback_exception couvre tout callback Tk (la quasi-
+        # totalité de l'interaction utilisateur), threading.excepthook
+        # couvre les threads daemon sans try/except propre, sys.excepthook
+        # couvre le thread principal hors mainloop. Ensemble, c'est la
+        # première fois que ce fichier capture des plantages qui, avant,
+        # disparaissaient silencieusement dans stderr d'une app fenêtrée
+        # sans console -- voir bug_reports.py pour ce qu'un rapport
+        # contient (jamais de code utilisateur).
+        self.root.report_callback_exception = self._on_uncaught_exception
+        threading.excepthook = self._on_uncaught_thread_exception
+        sys.excepthook = self._on_uncaught_main_exception
         self.root.title("UVI OS v9.0.0 — UNIVERSE · VISION · INTELLIGENCE")
         # 1500x1000 et non 1100x700 : la v9 affiche l'éditeur, la console,
         # la mémoire et SHION SIMULTANÉMENT là où la v8 basculait entre des
@@ -9140,6 +10718,24 @@ class UVIIDE:
         self.root.minsize(min(1180, largeur), min(760, hauteur))
         self.root.configure(bg=T.FOND)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Icône de fenêtre (barre des tâches / alt-tab) : le même « noyau »
+        # que le badge de la barre du haut (dessiner_noyau_uvi), pré-généré
+        # en PNG par assets/generer_logo.py -- iconphoto() sait choisir la
+        # résolution adaptée parmi celles fournies. Best-effort : un poste
+        # où le dossier assets/ a été supprimé ou déplacé doit quand même
+        # lancer l'IDE, juste sans icône personnalisée (icône Tk par
+        # défaut), donc jamais fatal.
+        try:
+            dossier_assets = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "assets")
+            self._images_icone = [
+                tk.PhotoImage(file=os.path.join(dossier_assets, f"uvi_icon_{t}.png"))
+                for t in (16, 24, 32, 48, 64, 128, 256)
+            ]
+            self.root.iconphoto(True, *self._images_icone)
+        except (tk.TclError, OSError) as exc:
+            print(f"[UVI] icône de fenêtre non chargée ({exc}) -- ignoré.")
 
         # --- État clavier pour KEY.* (voir _exec_key / _compile_key_node
         # / builtins KEY_* de la VM) -------------------------------------
@@ -9224,6 +10820,17 @@ class UVIIDE:
         if largeur:
             bouton.config(width=largeur)
 
+        # _tr_personnalise (pas _tr) : le texte affiché combine icône +
+        # texte en une seule chaîne (icone n'est jamais traduit, c'est un
+        # symbole) -- il faut recomposer les deux à chaque changement de
+        # langue, pas juste réinjecter _t(texte) tel quel. Rend TOUS les
+        # boutons construits via _bouton_plat traduisibles en direct dès
+        # lors que `texte` a une entrée dans TRANSLATIONS -- sinon reste
+        # affiché en français, jamais cassé.
+        self._tr_personnalise(
+            lambda b=bouton, i=icone, t=texte:
+                b.config(text=("%s  %s" % (i, self._t(t))).strip()))
+
         def entrer(_e, b=bouton):
             if b["state"] != tk.DISABLED:
                 b.config(bg=T.SURVOL)
@@ -9290,7 +10897,7 @@ class UVIIDE:
         groupe_run = tk.Frame(topbar, bg=T.FOND)
         groupe_run.pack(side=tk.LEFT, padx=6)
         self.btn_run = tk.Button(
-            groupe_run, text="▶  EXÉCUTER",
+            groupe_run, text=self._t("▶  EXÉCUTER"),
             bg=T.BLEU, fg="#FFFFFF",
             activebackground=T.BLEU_VIF, activeforeground="#FFFFFF",
             relief=tk.FLAT, bd=0, highlightthickness=0,
@@ -9328,14 +10935,33 @@ class UVIIDE:
         noyau = tk.Canvas(badge, width=34, height=34, bg=T.PANNEAU,
                           highlightthickness=0)
         noyau.pack(side=tk.LEFT, padx=(10, 8), pady=6)
-        noyau.create_oval(4, 4, 30, 30, outline=T.BLEU_VIF, width=2)
-        noyau.create_oval(11, 11, 23, 23, fill=T.CYAN, outline="")
+        dessiner_noyau_uvi(noyau, 17, 17, 15)
         colonne = tk.Frame(badge, bg=T.PANNEAU)
         colonne.pack(side=tk.LEFT, padx=(0, 14))
         tk.Label(colonne, text="UVI OS", bg=T.PANNEAU, fg=T.TEXTE_FORT,
                  font=("Segoe UI", 11, "bold")).pack(anchor=tk.W)
         tk.Label(colonne, text="v9.0.0", bg=T.PANNEAU, fg=T.CYAN,
                  font=("Segoe UI", 8)).pack(anchor=tk.W)
+
+        # --- badge de compte / abonnement (voir docs/COMPTES_ABONNEMENTS.md) --
+        # Construit UNIQUEMENT quand uvi_auth.is_configured() est vrai --
+        # sinon SUPABASE_URL/ANON_KEY ne sont pas renseignées (développement
+        # local, voir uvi_auth.py) et un bouton "Se connecter" qui ne mènerait
+        # nulle part serait plus trompeur qu'utile.
+        self.badge_compte = None
+        if uvi_auth.is_configured():
+            self.badge_compte = tk.Frame(topbar, bg=T.PANNEAU, highlightthickness=1,
+                                          highlightbackground=T.BORDURE_VIVE)
+            self.badge_compte.pack(side=tk.LEFT, padx=(0, 14), pady=8)
+            self.lbl_compte = tk.Label(self.badge_compte, bg=T.PANNEAU, fg=T.TEXTE_FORT,
+                                        font=("Segoe UI", 9))
+            self.lbl_compte.pack(side=tk.LEFT, padx=(12, 8), pady=6)
+            self.btn_compte = tk.Button(
+                self.badge_compte, relief=tk.FLAT, bd=0, bg=T.PANNEAU, fg=T.CYAN,
+                font=("Segoe UI", 9, "bold"), cursor="hand2", padx=10, pady=6,
+            )
+            self.btn_compte.pack(side=tk.LEFT, padx=(0, 10))
+            self._rafraichir_badge_compte()
 
         # Les boutons réduire / agrandir / fermer ont été RETIRÉS. Ils
         # doublonnaient les décorations de fenêtre du système, qui restent
@@ -10047,8 +11673,16 @@ class UVIIDE:
         entete = tk.Frame(exterieur, bg=T.PANNEAU_HAUT, height=34)
         entete.pack(fill=tk.X)
         entete.pack_propagate(False)
-        tk.Label(entete, text=titre, bg=T.PANNEAU_HAUT,
-                 fg=accent or T.CYAN, font=T.UI_TITRE).pack(side=tk.LEFT, padx=12)
+        # self._tr (pas juste text=titre) : _carte() est le point de
+        # construction PARTAGÉ de la quasi-totalité des panneaux titrés de
+        # l'IDE (PARAMÈTRES, MODULES, RAPPORTS DE BUGS...) -- un seul
+        # changement ici rend TOUS ces titres traduisibles en direct (voir
+        # TRANSLATIONS/_t/_tr), sans toucher chacun de leurs appelants.
+        # Un titre sans entrée dans TRANSLATIONS reste simplement affiché
+        # en français, jamais cassé.
+        self._tr(tk.Label(entete, bg=T.PANNEAU_HAUT,
+                          fg=accent or T.CYAN, font=T.UI_TITRE), titre).pack(
+                              side=tk.LEFT, padx=12)
         if menu:
             tk.Label(entete, text="···", bg=T.PANNEAU_HAUT, fg=T.TEXTE_FAIBLE,
                      font=("Segoe UI", 11)).pack(side=tk.RIGHT, padx=12)
@@ -10087,19 +11721,25 @@ class UVIIDE:
         dock = tk.Frame(centre, bg=T.FOND, height=290)
         dock.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
         dock.pack_propagate(False)
+        # Gardés sur self (dock était purement local avant) : nécessaires
+        # à _basculer_dock_console pour replier/déplier tout le dock d'un
+        # bloc -- voir sa docstring pour pourquoi cadre_editeur doit lui
+        # aussi être ré-empaqueté à chaque bascule, pas seulement dock.
+        self.dock = dock
+        self._dock_ouvert = True
 
-        # workspace = pile de vues (éditeur / canevas / SHION).
+        # workspace = pile de vues (éditeur / canevas).
         # Nom conservé : _show_view et les _build_*_tab l'utilisent.
         cadre_editeur = tk.Frame(centre, bg=T.PANNEAU, highlightthickness=1,
                                  highlightbackground=T.BORDURE)
         cadre_editeur.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        self.cadre_editeur = cadre_editeur
         self._build_barre_onglets(cadre_editeur)
         self.workspace = tk.Frame(cadre_editeur, bg=T.PANNEAU)
         self.workspace.pack(fill=tk.BOTH, expand=True)
 
         self._build_editor()
         self._build_canvas_tab()
-        self._build_shion_tab()
         self._build_barre_etat_editeur(cadre_editeur)
 
         self._build_terminal(dock)
@@ -10136,14 +11776,15 @@ class UVIIDE:
         # rail pilote désormais réellement le contenu de la colonne gauche,
         # sur le modèle d'une barre d'activité d'éditeur moderne.
         for cle, icone, libelle, _ in entrees:
-            commande = (lambda c=cle: self.afficher_panneau_gauche(c))
+            commande = (lambda c=cle: self._basculer_panneau_gauche(c))
             bloc = tk.Frame(rail, bg=T.PANNEAU, cursor="hand2")
             bloc.pack(fill=tk.X, pady=3)
             icone_lbl = tk.Label(bloc, text=icone, bg=T.PANNEAU, fg=T.TEXTE,
                                  font=("Segoe UI", 17))
             icone_lbl.pack(pady=(9, 1))
-            texte_lbl = tk.Label(bloc, text=libelle, bg=T.PANNEAU,
+            texte_lbl = tk.Label(bloc, bg=T.PANNEAU,
                                  fg=T.TEXTE_FAIBLE, font=("Segoe UI", 6, "bold"))
+            self._tr(texte_lbl, libelle)
             texte_lbl.pack(pady=(0, 9))
             # Le clic doit fonctionner sur le bloc ET sur ses deux enfants :
             # un Label posé sur un Frame intercepte l'événement, donc lier
@@ -10163,9 +11804,25 @@ class UVIIDE:
         pied.create_text(26, 24, text="UVI", fill=T.CYAN,
                          font=("Segoe UI", 11, "bold"))
 
+    def _basculer_panneau_gauche(self, nom):
+        """Clic sur une icône du RAIL (pas les autres appelants de
+        afficher_panneau_gauche, ex. menu « Panneau : Modules ») : referme
+        la colonne si `nom` est déjà le panneau actif ET visible, sinon
+        l'ouvre/y bascule -- même comportement qu'une barre d'activité
+        d'éditeur moderne (VS Code). Rend à l'éditeur/canevas les 286px de
+        la colonne à la demande, sans jamais les perdre pour de bon (un
+        second clic les rouvre)."""
+        if self.frame_sidebar.winfo_ismapped() and getattr(self, "_panneau_gauche_actif", None) == nom:
+            self.frame_sidebar.pack_forget()
+            return
+        self.afficher_panneau_gauche(nom)
+
     def afficher_panneau_gauche(self, nom):
         """Bascule la colonne gauche vers le panneau `nom` et met le rail en
-        accord.
+        accord. RÉOUVRE la colonne si elle avait été repliée (voir
+        _basculer_panneau_gauche) -- tout appelant DIRECT de cette méthode
+        (menus, quick-access) veut voir `nom`, jamais juste changer son
+        contenu en coulisses pendant qu'elle reste invisible.
 
         Les sept panneaux sont construits UNE fois au démarrage puis
         masqués/affichés par pack_forget/pack -- pas reconstruits à chaque
@@ -10175,12 +11832,14 @@ class UVIIDE:
         panneaux = getattr(self, "_panneaux_gauche", {})
         if nom not in panneaux:
             return
+        if not self.frame_sidebar.winfo_ismapped():
+            self.frame_sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(6, 0), pady=6)
         for cle, cadre in panneaux.items():
             cadre.pack_forget()
         panneaux[nom].pack(fill=tk.BOTH, expand=True)
         self._panneau_gauche_actif = nom
         self.titre_colonne_gauche.config(
-            text=self._TITRES_PANNEAUX.get(nom, nom.upper()))
+            text=self._t(self._TITRES_PANNEAUX.get(nom, nom.upper())))
 
         for cle, (bloc, icone, texte) in getattr(self, "_boutons_rail", {}).items():
             actif = (cle == nom)
@@ -10257,8 +11916,17 @@ class UVIIDE:
         except Exception as e:
             sortie_tw, erreurs_tw = [], ["exception : %s" % e]
         try:
+            # max_string_length/max_call_depth/max_array_size alignés sur
+            # les plafonds du tree-walker (MAX_STRING_LENGTH/MAX_CALL_DEPTH/
+            # MAX_ARRAY_SIZE) -- sans ça, cette comparaison même ne peut pas
+            # détecter une divergence causée par ces plafonds, puisqu'elle
+            # donnerait alors à chaque moteur une limite différente (voir
+            # le même correctif dans run_script_vm).
             resultat = compile_and_run(list(lignes), self.engine.parser,
-                                       UVIBytecodeCompilerV2(), vfs=InMemoryVFS())
+                                       UVIBytecodeCompilerV2(), vfs=InMemoryVFS(),
+                                       max_string_length=MAX_STRING_LENGTH,
+                                       max_call_depth=MAX_CALL_DEPTH,
+                                       max_array_size=MAX_ARRAY_SIZE)
             sortie_vm = [str(x) for x in resultat.output]
             trap = resultat.trapped
         except Exception as e:
@@ -11228,12 +12896,20 @@ class UVIIDE:
             ("temperature", "Température", str(DEEPSEEK_TEMPERATURE), "0.5 à 0.7 — jamais 0"),
             ("max_tokens", "Budget de tokens", str(DEEPSEEK_MAX_TOKENS), "≥ 4096 conseillé"),
         ):
-            tk.Label(contenu, text=libelle, bg=T.PANNEAU, fg=T.TEXTE,
-                     font=("Segoe UI", 8, "bold")).pack(anchor=tk.W, padx=12, pady=(8, 2))
+            self._tr(tk.Label(contenu, bg=T.PANNEAU, fg=T.TEXTE,
+                              font=("Segoe UI", 8, "bold")), libelle).pack(
+                                  anchor=tk.W, padx=12, pady=(8, 2))
             champ = tk.Entry(contenu, bg=T.CHAMP, fg=T.TEXTE, insertbackground=T.CYAN,
                              relief=tk.FLAT, font=("Consolas", 9),
                              highlightthickness=1, highlightbackground=T.BORDURE,
-                             highlightcolor=T.CYAN)
+                             highlightcolor=T.CYAN,
+                             # Masquée comme un champ de mot de passe : la
+                             # clé d'API reste lisible par quiconque a accès
+                             # au fichier de config, mais n'a aucune raison
+                             # de rester affichée EN CLAIR à l'écran (partage
+                             # d'écran, capture, épaule au-dessus) une fois
+                             # déjà saisie une première fois.
+                             show=("•" if cle == "cle" else None))
             champ.pack(fill=tk.X, padx=12, ipady=4)
             champ.insert(0, str(valeur))
             self.champs_parametres[cle] = champ
@@ -11247,6 +12923,86 @@ class UVIIDE:
         self._bouton_plat(barre, "Tester", self.tester_connexion_shion,
                           couleur=T.CYAN, icone="🔌").pack(side=tk.LEFT, padx=6)
 
+        # --- Langue de l'interface --------------------------------------
+        # Un bouton par langue (même schéma que les préréglages 1,5B/7B du
+        # modèle local plus bas -- choix mutuellement exclusif, la langue
+        # active mise en évidence) plutôt qu'un menu déroulant Tk
+        # (OptionMenu/Combobox) : ni l'un ni l'autre ne s'habille bien du
+        # thème plat sombre déjà utilisé partout ailleurs dans ce panneau,
+        # alors qu'une rangée de _bouton_plat s'y fond nativement.
+        contenu_langue = self._carte(interieur, "LANGUE", menu=False)
+        contenu_langue.master.pack(fill=tk.X, pady=(8, 0))
+        barre_langue = tk.Frame(contenu_langue, bg=T.PANNEAU)
+        barre_langue.pack(fill=tk.X, padx=12, pady=12)
+        self._boutons_langue = {}
+        for code, nom in LANGUES.items():
+            bouton = self._bouton_plat(
+                barre_langue, nom, lambda c=code: self._changer_langue_parametres(c),
+                couleur=T.CYAN, gras=False)
+            bouton.pack(side=tk.LEFT, padx=(0, 6), pady=2)
+            self._boutons_langue[code] = bouton
+        self._rafraichir_boutons_langue()
+
+        # --- Modèle local llama.cpp, géré DEPUIS l'IDE (voir
+        # _definir_modele_local) : démarre server/serve_llamacpp.py comme
+        # sous-processus, attend qu'il soit prêt, puis remplit les champs
+        # ci-dessus et clique "Appliquer" à la place de l'utilisateur --
+        # voir docs/SERVEUR_LOCAL_CPU.md pour l'équivalent en ligne de
+        # commande et les mesures de vitesse par préréglage.
+        contenu_local = self._carte(interieur, "MODÈLE LOCAL (llama.cpp, CPU)", menu=False)
+        contenu_local.master.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(contenu_local, text=
+                 "Lance server/serve_llamacpp.py depuis l'IDE et reconnecte "
+                 "SHION dessus automatiquement. Un seul modèle chargé à la "
+                 "fois : changer de taille arrête l'autre proprement.",
+                 bg=T.PANNEAU, fg=T.TEXTE_FAIBLE, font=("Segoe UI", 7),
+                 wraplength=280, justify=tk.LEFT).pack(
+                     anchor=tk.W, padx=12, pady=(8, 6))
+        barre_local = tk.Frame(contenu_local, bg=T.PANNEAU)
+        barre_local.pack(fill=tk.X, padx=12)
+        # Étiquettes des boutons seulement -- "Shion-Flash"/"Shion" plutôt
+        # que "1,5B"/"7B" (les tailles DeepSeek d'origine), à la demande.
+        # Le préréglage interne (clé "1.5b"/"7b" passée à
+        # _definir_modele_local, alias exposé sur /v1/models, champ "Nom du
+        # modèle" et table ÉTAT DU SYSTÈME plus bas) reste identique --
+        # seul ce que l'utilisateur LIT sur ces deux boutons change, pas la
+        # mécanique ni les identifiants techniques réels.
+        self._bouton_plat(barre_local, "Shion-Flash", lambda: self._definir_modele_local("1.5b"),
+                          couleur=T.CYAN, icone="⚡", gras=False).pack(side=tk.LEFT)
+        self._bouton_plat(barre_local, "Shion", lambda: self._definir_modele_local("7b"),
+                          couleur=T.VIOLET, icone="🐢", gras=False).pack(side=tk.LEFT, padx=6)
+        self._bouton_plat(barre_local, "Arrêter", self._arreter_modele_local,
+                          couleur=T.ROUGE, icone="■", gras=False).pack(side=tk.LEFT)
+        self.label_statut_modele_local = tk.Label(
+            contenu_local, text="Arrêté.", bg=T.PANNEAU, fg=T.TEXTE_FAIBLE,
+            font=("Consolas", 8))
+        self.label_statut_modele_local.pack(anchor=tk.W, padx=12, pady=(8, 10))
+
+        # Rapports de bugs (voir bug_reports.py) : carte volontairement
+        # visible depuis l'IDE, pas juste un mécanisme silencieux en
+        # arrière-plan -- la garantie "jamais votre code" (voir la
+        # docstring du module) est plus crédible si l'utilisateur peut
+        # lui-même ouvrir le dossier et vérifier qu'il n'y a que des
+        # faits structurels (type d'erreur, ligne, traceback interne),
+        # jamais son script.
+        contenu_bugs = self._carte(interieur, "RAPPORTS DE BUGS", menu=False)
+        contenu_bugs.master.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(contenu_bugs, text=
+                 "Un plantage inattendu enregistre localement un rapport "
+                 "SANS AUCUN CODE (type d'erreur, ligne, traceback interne "
+                 "uniquement) -- jamais transmis nulle part, voir "
+                 "bug_reports.py. Désactivable via UVI_BUG_REPORTS=0.",
+                 bg=T.PANNEAU, fg=T.TEXTE_FAIBLE, font=("Segoe UI", 7),
+                 wraplength=280, justify=tk.LEFT).pack(
+                     anchor=tk.W, padx=12, pady=(8, 6))
+        self._bouton_plat(contenu_bugs, "Ouvrir le dossier", self._ouvrir_dossier_rapports_bugs,
+                          couleur=T.CYAN, icone="📂", gras=False).pack(
+                              anchor=tk.W, padx=12, pady=(0, 6))
+        self.label_statut_rapports_bugs = tk.Label(
+            contenu_bugs, text="", bg=T.PANNEAU, fg=T.TEXTE_FAIBLE,
+            font=("Consolas", 8))
+        self.label_statut_rapports_bugs.pack(anchor=tk.W, padx=12, pady=(0, 10))
+
         contenu_etat = self._carte(interieur, "ÉTAT DU SYSTÈME", menu=False)
         contenu_etat.master.pack(fill=tk.X, pady=(8, 8))
         self.table_parametres = tk.Text(
@@ -11259,7 +13015,28 @@ class UVIIDE:
         self.table_parametres.tag_configure("non", foreground=T.ROUGE)
         self.table_parametres.tag_configure("val", foreground=T.TEXTE)
 
+    def _ouvrir_dossier_rapports_bugs(self):
+        """Ouvre bug_reports/ dans l'explorateur -- crée le dossier s'il
+        n'existe pas encore (aucun plantage capturé jusqu'ici) plutôt que
+        d'échouer silencieusement sur un chemin absent, pour que le bouton
+        fasse toujours quelque chose de visible."""
+        if not HAS_BUG_REPORTS:
+            self._empiler_toast("Rapports de bugs indisponibles (bug_reports.py manquant).", "err")
+            return
+        try:
+            os.makedirs(bug_reports.reports_dir(), exist_ok=True)
+            os.startfile(bug_reports.reports_dir())
+        except Exception as e:
+            self._empiler_toast("Impossible d'ouvrir le dossier : %s" % type(e).__name__, "err")
+
     def rafraichir_parametres(self):
+        if hasattr(self, "label_statut_rapports_bugs"):
+            try:
+                n = bug_reports.report_count() if HAS_BUG_REPORTS else 0
+                self.label_statut_rapports_bugs.config(
+                    text="%d rapport(s) enregistré(s) localement." % n)
+            except tk.TclError:
+                pass
         if not hasattr(self, "table_parametres"):
             return
         try:
@@ -11277,6 +13054,8 @@ class UVIIDE:
                 ("Stockage", getattr(self.vfs, "storage_dir", "mémoire"), "val"),
                 ("Mémoire max", "%d octets" % MAX_MEMORY_BYTES, "val"),
                 ("Chaîne max", "%d caractères" % MAX_STRING_LENGTH, "val"),
+                ("Rapports de bugs", "disponible" if HAS_BUG_REPORTS else "indisponible",
+                 "oui" if HAS_BUG_REPORTS else "non"),
             )
             for cle, valeur, etiquette in lignes:
                 self.table_parametres.insert(tk.END, "%-16s " % cle, "cle")
@@ -11362,6 +13141,133 @@ class UVIIDE:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _set_statut_modele_local(self, texte: str) -> None:
+        if hasattr(self, "label_statut_modele_local"):
+            self.label_statut_modele_local.config(text=texte)
+
+    #: Noms affichés pour les préréglages du modèle local -- voir la note
+    #: sur les étiquettes de bouton dans _build_panneau_parametres. Ne
+    #: change QUE ce qui est écrit dans les messages utilisateur ci-dessous
+    #: (log/statut) ; la clé "1.5b"/"7b" elle-même, l'alias technique
+    #: (deepseek-r1-distill-qwen-*) et le champ "Nom du modèle" restent
+    #: inchangés.
+    _NOMS_AFFICHES_PRESET = {"1.5b": "Shion-Flash", "7b": "Shion"}
+
+    def _definir_modele_local(self, preset: str) -> None:
+        """Démarre server/serve_llamacpp.py (préréglage \"1.5b\" ou \"7b\")
+        comme sous-processus de l'IDE, attend qu'il soit prêt, puis
+        reconnecte SHION dessus -- voir docs/SERVEUR_LOCAL_CPU.md pour les
+        mesures de vitesse par préréglage sur cette machine (les deux sont
+        lents ici faute d'AVX2, mais le principe vaut pour toute machine).
+
+        Aucun redémarrage si le préréglage demandé tourne déjà (évite de
+        perdre ~10-20s de rechargement pour rien en cliquant deux fois sur
+        le même bouton)."""
+        nom_affiche = self._NOMS_AFFICHES_PRESET.get(preset, preset)
+        if (self._preset_llm_local_actif == preset
+                and self._processus_llm_local is not None
+                and self._processus_llm_local.poll() is None):
+            self.log("%s local tourne déjà." % nom_affiche, "sys")
+            return
+
+        racine = os.path.dirname(os.path.abspath(__file__))
+        script = os.path.join(racine, "server", "serve_llamacpp.py")
+        alias_attendu = {
+            "1.5b": "deepseek-r1-distill-qwen-1.5b",
+            "7b": "deepseek-r1-distill-qwen-7b",
+        }.get(preset)
+        if alias_attendu is None:
+            return
+        if not os.path.isfile(script):
+            self.log("server/serve_llamacpp.py introuvable.", "err")
+            return
+
+        self._arreter_modele_local(silencieux=True)
+        self._set_statut_modele_local("Démarrage de %s..." % nom_affiche)
+        self.log("Lancement du serveur local llama.cpp (%s)..." % nom_affiche, "sys")
+        try:
+            self._processus_llm_local = subprocess.Popen(
+                [sys.executable, script, preset], cwd=racine,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as e:
+            self.log("Impossible de lancer le serveur local : %s" % e, "err")
+            self._set_statut_modele_local("Erreur au lancement.")
+            return
+        self._preset_llm_local_actif = preset
+
+        # Même clé que celle affichée dans le champ "Clé d'API" : lue ICI,
+        # sur le thread Tk, pas dans le thread de sondage ci-dessous (accès
+        # widget hors thread principal à éviter -- même règle que
+        # tester_connexion_shion juste au-dessus).
+        cle = self.champs_parametres["cle"].get().strip() or "uvi-local"
+
+        def _attendre_pret():
+            url = "http://127.0.0.1:8000/v1/models"
+            debut = time.time()
+            while time.time() - debut < 120:
+                if (self._processus_llm_local is None
+                        or self._processus_llm_local.poll() is not None):
+                    def _sur_arret_premature():
+                        self._set_statut_modele_local("Le serveur s'est arrêté prématurément.")
+                        self.log(
+                            "Le serveur local (%s) s'est arrêté avant d'être "
+                            "prêt -- modèle GGUF manquant dans models/ ? Voir "
+                            "docs/SERVEUR_LOCAL_CPU.md §1." % nom_affiche, "err")
+                    self._poster_ui(_sur_arret_premature)
+                    return
+                try:
+                    requete = urllib.request.Request(url)
+                    requete.add_header("Authorization", "Bearer %s" % cle)
+                    with urllib.request.urlopen(requete, timeout=3) as reponse:
+                        corps = json.loads(reponse.read().decode("utf-8"))
+                    noms = [m.get("id") for m in corps.get("data", [])]
+                    if alias_attendu in noms:
+                        self._poster_ui(
+                            lambda: self._finaliser_bascule_modele_local(alias_attendu))
+                        return
+                except Exception:
+                    pass
+                time.sleep(2)
+
+            def _sur_timeout():
+                self._set_statut_modele_local("Chargement > 2 min, pas encore prêt.")
+                self.log(
+                    "Le serveur local (%s) met plus de 2 min à charger -- pas "
+                    "forcément une panne (chargement du GGUF en RAM), "
+                    "réessayez « Tester » dans un instant." % nom_affiche, "err")
+            self._poster_ui(_sur_timeout)
+
+        threading.Thread(target=_attendre_pret, daemon=True).start()
+
+    def _finaliser_bascule_modele_local(self, alias: str) -> None:
+        self.champs_parametres["url"].delete(0, tk.END)
+        self.champs_parametres["url"].insert(0, "http://127.0.0.1:8000")
+        self.champs_parametres["modele"].delete(0, tk.END)
+        self.champs_parametres["modele"].insert(0, alias)
+        self.appliquer_parametres()
+        self._set_statut_modele_local("Prêt : %s" % alias)
+        self.log("Serveur local prêt et connecté (%s)." % alias, "ok")
+
+    def _arreter_modele_local(self, silencieux: bool = False) -> None:
+        """Arrête proprement le sous-processus lancé par _definir_modele_local
+        (le cas échéant). N'affecte PAS un serveur lancé à la main dans un
+        terminal externe -- l'IDE ne le connaît pas, donc ne le touche pas."""
+        proc = self._processus_llm_local
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            if not silencieux:
+                self.log("Serveur local arrêté.", "sys")
+        self._processus_llm_local = None
+        if not silencieux:
+            self._preset_llm_local_actif = None
+            self._set_statut_modele_local("Arrêté.")
+
     def rafraichir_variables(self):
         """Table des variables en direct. Appelée après chaque exécution.
 
@@ -11419,25 +13325,38 @@ class UVIIDE:
                  fg=T.TEXTE_FAIBLE, font=("Segoe UI", 8),
                  cursor="hand2").pack(side=tk.LEFT, padx=(9, 9))
 
-        # Les vues secondaires (canevas, SHION) deviennent des onglets à
-        # côté du fichier : en v8 elles étaient des boutons perdus au
-        # milieu de la barre d'outils supérieure, sans rien indiquer qu'il
-        # s'agissait de VUES et non d'actions.
+        # Les vues secondaires (canevas) deviennent des onglets à côté du
+        # fichier : en v8 elles étaient des boutons perdus au milieu de la
+        # barre d'outils supérieure, sans rien indiquer qu'il s'agissait de
+        # VUES et non d'actions.
+        #
+        # L'onglet SHION (troisième vue, à côté de CANEVAS) a été RETIRÉ
+        # ici : il partageait les noms self.shion_input/self.shion_historique/
+        # btn_shion_send avec _build_colonne_shion (la colonne de droite,
+        # construite APRÈS lui dans _build_container), qui les écrasait
+        # systématiquement -- cet onglet était donc mort depuis sa
+        # création, ses propres champs de saisie et historique n'ayant
+        # jamais reçu la moindre interaction réelle. Les conversations
+        # SHION passent uniquement par _build_colonne_shion, la colonne de
+        # droite -- c'est elle qui reste, avec les mêmes boutons
+        # EXPLIQUER/OPTIMISER/DÉBOGUER/GÉNÉRER. _build_shion_tab et
+        # show_shion ont été supprimées avec ce commentaire, pas juste
+        # débranchées, pour ne pas laisser du code mort qu'une prochaine
+        # session croirait à tort fonctionnel.
         for cle, libelle, commande in (
             ("editor", "◧ ÉDITEUR", self.show_editor),
             ("canvas", "▦ CANEVAS", self.show_canvas),
-            ("shion", "🧠 SHION", self.show_shion),
         ):
             bouton = tk.Button(
-                barre, text=libelle, bg=T.PANNEAU_HAUT, fg=T.TEXTE_FAIBLE,
+                barre, bg=T.PANNEAU_HAUT, fg=T.TEXTE_FAIBLE,
                 activebackground=T.SURVOL, activeforeground=T.CYAN,
                 relief=tk.FLAT, bd=0, highlightthickness=0,
                 font=("Segoe UI", 8), cursor="hand2",
                 command=commande, padx=11, pady=5,
             )
+            self._tr(bouton, libelle)
             bouton.pack(side=tk.LEFT, padx=2, pady=4)
-            setattr(self, "btn_%s" % {"editor": "edit", "canvas": "canvas",
-                                      "shion": "shion"}[cle], bouton)
+            setattr(self, "btn_%s" % {"editor": "edit", "canvas": "canvas"}[cle], bouton)
         # btn_term référencé ailleurs : conservé, redirigé vers la console
         # du dock (qui n'est plus une vue mais reste focalisable).
         self.btn_term = tk.Button(barre, text="TERMINAL", command=self.show_terminal)
@@ -11454,6 +13373,54 @@ class UVIIDE:
                      font=("Consolas", 8)).pack(side=tk.LEFT, padx=11)
         tk.Label(barre, text="UVi", bg=T.PANNEAU_HAUT, fg=T.BORDURE_VIVE,
                  font=("Segoe UI", 12, "bold")).pack(side=tk.RIGHT, padx=14)
+        # Bascule du dock console (voir _basculer_dock_console) : posée ICI,
+        # dans la barre d'état de l'ÉDITEUR (toujours visible, en dehors du
+        # dock lui-même) et non dans le dock -- un bouton qui vivrait DANS
+        # le dock disparaîtrait avec lui une fois replié, sans aucun moyen
+        # de le rouvrir.
+        self.btn_basculer_dock = tk.Button(
+            barre, text="▾ CONSOLE", bg=T.PANNEAU_HAUT, fg=T.TEXTE_FAIBLE,
+            activebackground=T.SURVOL, activeforeground=T.CYAN,
+            relief=tk.FLAT, bd=0, highlightthickness=0,
+            font=("Segoe UI", 8, "bold"), cursor="hand2",
+            command=self._basculer_dock_console, padx=10)
+        self.btn_basculer_dock.pack(side=tk.RIGHT, padx=(0, 4))
+
+    def _basculer_dock_console(self):
+        """Replie/déplie le dock console (console + mémoire VM) EN BLOC,
+        pour rendre à l'éditeur/canevas ses ~290px de hauteur à la
+        demande.
+
+        pack_forget() PUIS pack() sur dock seul ne suffirait pas : Tkinter
+        réinsère un widget ré-empaqueté à la FIN de l'ordre de packing
+        courant, pas à sa position d'origine -- si cadre_editeur (déjà
+        pack(expand=True)) restait premier dans cet ordre, il capturerait
+        toute la cavité et écraserait le dock tout juste rouvert (même
+        piège que celui déjà documenté dans _build_container pour l'ordre
+        initial dock-avant-cadre_editeur). Retirer puis ré-empaqueter LES
+        DEUX widgets, dans le même ordre qu'au démarrage, reproduit
+        exactement l'agencement d'origine à chaque bascule."""
+        if self._dock_ouvert:
+            self.dock.pack_forget()
+            self._dock_ouvert = False
+        else:
+            self.cadre_editeur.pack_forget()
+            self.dock.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+            self.cadre_editeur.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+            self._dock_ouvert = True
+        self.btn_basculer_dock.config(
+            text="▾ CONSOLE" if self._dock_ouvert else "▴ CONSOLE")
+
+    def _assurer_dock_ouvert(self):
+        """Rouvre le dock s'il a été replié -- appelée partout où quelque
+        chose qui VIT dans le dock doit redevenir visible (nouvelle sortie
+        de script via show_terminal, invite ?INPUT via _ouvrir_saisie).
+        Sans ça, replier le dock pour gagner de la place reproduirait
+        exactement le bug déjà corrigé une fois ailleurs dans ce fichier :
+        un ?INPUT qui semble figé parce que la barre qui y répond est
+        invisible."""
+        if not self._dock_ouvert:
+            self._basculer_dock_console()
 
     def _rafraichir_position_curseur(self, _event=None):
         try:
@@ -11600,14 +13567,29 @@ class UVIIDE:
         cadre = tk.Frame(colonne, bg=T.PANNEAU, highlightthickness=1,
                          highlightbackground=T.BORDURE)
         cadre.pack(fill=tk.BOTH, expand=True)
-        entete = tk.Frame(cadre, bg=T.PANNEAU_HAUT, height=56)
+        # En-tête agrandie (56 -> 72px) : c'est ici que vit l'avatar SHION
+        # (voir ShionAvatar plus haut dans ce fichier). L'ancien emblème
+        # (anneau + point fixes, 30x30) était trop petit pour que des
+        # yeux/une bouche restent lisibles -- seule la TAILLE change,
+        # l'emplacement et le rôle ("logo SHION en tête du panneau de
+        # discussion") restent ceux d'origine (§21 de la demande : ne pas
+        # détruire l'identité visuelle existante).
+        entete = tk.Frame(cadre, bg=T.PANNEAU_HAUT, height=72)
         entete.pack(fill=tk.X)
         entete.pack_propagate(False)
-        emblème = tk.Canvas(entete, width=30, height=30, bg=T.PANNEAU_HAUT,
+        emblème = tk.Canvas(entete, width=52, height=52, bg=T.PANNEAU_HAUT,
                             highlightthickness=0)
-        emblème.pack(side=tk.LEFT, padx=(12, 8), pady=13)
-        emblème.create_oval(3, 3, 27, 27, outline=T.CYAN, width=2)
-        emblème.create_oval(11, 11, 19, 19, fill=T.CYAN, outline="")
+        emblème.pack(side=tk.LEFT, padx=(12, 8), pady=10)
+        # ShionAvatar dessine et anime CE canvas lui-même à chaque tick
+        # (voir ShionAvatarRenderer) -- plus besoin des deux create_oval
+        # statiques d'origine, l'état IDLE de l'avatar produit un rendu
+        # équivalent (anneau + "yeux" au repos) mais vivant.
+        self.shion_avatar = ShionAvatar(emblème, config=ShionAvatarConfig(debug=False))
+        self.shion_avatar.demarrer()
+        # Clic droit sur l'avatar : mode debug (§17 -- panneau d'état +
+        # boutons de test par émotion), sans ajouter de chrome UI visible
+        # en permanence pour une fonctionnalité de développement.
+        emblème.bind("<Button-3>", lambda e: self.shion_avatar.ouvrir_debug(self.root))
         colonne_titre = tk.Frame(entete, bg=T.PANNEAU_HAUT)
         colonne_titre.pack(side=tk.LEFT, pady=11)
         tk.Label(colonne_titre, text="SHION", bg=T.PANNEAU_HAUT, fg=T.CYAN,
@@ -11754,28 +13736,47 @@ class UVIIDE:
         La consigne « réponds en français » n'est pas décorative : les
         distillations R1 de DeepSeek répondent volontiers en anglais ou en
         chinois quand la question ne fixe pas la langue, y compris quand le
-        code commenté est en français."""
+        code commenté est en français.
+
+        expliquer/optimiser/deboguer envoient désormais bien plus que le
+        code brut : _construire_contexte_langage_uvi y ajoute la référence
+        du langage UVI ET l'AST réel du code (produit par le VRAI parseur,
+        pas deviné par SHION) -- voir sa docstring pour le pourquoi. Avant
+        ce changement, SHION ne recevait que le texte source et devait
+        deviner la syntaxe par analogie avec un langage connu, ce qui
+        produisait des explications plausibles mais parfois fausses sur
+        les points où UVI diverge. L'historique affiché reste COURT (la
+        consigne seule) grâce aux paramètres question/prompt_envoye de
+        _chat_send -- l'utilisateur ne voit pas défiler l'AST complet à
+        chaque clic, seulement la question posée."""
         code = self.editor.get("1.0", tk.END).strip()
         if action != "generer" and not code:
             self.show_terminal()
             self.log("Éditeur vide : écrivez d'abord un script.", "err")
             return
-        gabarits = {
-            "expliquer": "Explique ce code UVI en détail, en français, étape par "
-                         "étape :\n\n%s" % code,
+        consignes = {
+            "expliquer": "Explique ce code UVI en détail, en français, étape par étape.",
             "optimiser": "Propose une version optimisée de ce code UVI, en "
-                         "français, en expliquant chaque changement :\n\n%s" % code,
-            "deboguer": "Trouve les bugs de ce code UVI et propose une "
-                        "correction, en français :\n\n%s" % code,
-            "generer": "Génère un script UVI complet et commenté, en français. "
-                       "Le langage UVI utilise : ! pour afficher, ? pour lire une "
-                       "saisie, %% pour boucler, ~ pour une condition, DEF pour "
-                       "définir une fonction, CALL pour l'appeler.",
+                         "français, en expliquant chaque changement.",
+            "deboguer": "Trouve les bugs de ce code UVI et propose une correction, en français.",
         }
-        self.show_shion()
-        self.shion_input.delete(0, tk.END)
-        self.shion_input.insert(0, gabarits[action])
-        self._shion_send_message()
+        # show_shion() basculait vers l'onglet SHION du workspace central --
+        # supprimé (voir la note dans _build_barre_onglets) car mort : la
+        # VRAIE conversation se déroule dans la colonne de droite
+        # (_build_colonne_shion), déjà en permanence à l'écran, donc rien à
+        # « montrer » explicitement ici.
+        if action == "generer":
+            texte_affiche = "Génère un script UVI complet et commenté, en français."
+            prompt = (
+                UVI_REFERENCE_LANGAGE + "\n\n" + texte_affiche
+                + " Respecte STRICTEMENT la syntaxe ci-dessus : n'invente "
+                  "aucun mot-clé ou symbole qui n'y figure pas."
+            )
+        else:
+            texte_affiche = consignes[action]
+            prompt = self._construire_contexte_langage_uvi() + "\n\nQuestion : " + texte_affiche
+        self._chat_send("shion", self.engine.shion_client, "SHION",
+                        question=texte_affiche, prompt_envoye=prompt)
 
     def _build_editor(self):
         self.frame_editor = tk.Frame(self.workspace, bg=T.CHAMP)
@@ -11959,14 +13960,19 @@ class UVIIDE:
             (0, 0), window=self.bande_onglets, anchor="nw")
 
         for nom in self._ONGLETS_CONSOLE:
+            # nom reste l'identifiant INTERNE partout ailleurs (filtres de
+            # _selectionner_onglet_console, self._onglet_console_actif,
+            # etc.) -- seul le TEXTE AFFICHÉ sur le bouton doit changer de
+            # langue, via _tr (option="text"), jamais nom lui-même.
             bouton = tk.Button(
-                self.bande_onglets, text=nom, bg=T.PANNEAU_HAUT, fg=T.TEXTE_FAIBLE,
+                self.bande_onglets, bg=T.PANNEAU_HAUT, fg=T.TEXTE_FAIBLE,
                 activebackground=T.PANNEAU, activeforeground=T.CYAN,
                 relief=tk.FLAT, bd=0, highlightthickness=0,
                 font=("Segoe UI", 8, "bold"), cursor="hand2",
                 padx=12, pady=6,
                 command=lambda n=nom: self._selectionner_onglet_console(n),
             )
+            self._tr(bouton, nom)
             bouton.pack(side=tk.LEFT, padx=1)
             self._onglets_console[nom] = bouton
 
@@ -12350,77 +14356,11 @@ class UVIIDE:
         # plausible des blocages observés en jeu.
         self._poster_ui(_do)
 
-    def _build_chat_panel(self, prefixe: str, titre: str, couleur_titre: str,
-                          on_send, on_reset, couleur_reponse: str = "#00FF00"):
-        """Construit un panneau de discussion (historique + saisie + bouton).
-
-        FACTORISÉE plutôt qu'écrite en place dans _build_shion_tab : un
-        panneau de discussion IA est un composant générique (historique +
-        champ de saisie + bouton), et le projet a déjà eu un second onglet
-        de ce type par le passé (ERIS, un assistant Gemini séparé, retiré
-        depuis -- SHION couvre son rôle). Garder la construction factorisée
-        évite qu'un futur second onglet de discussion ne reparte d'une
-        copie plutôt que de cette fabrique.
-
-        Les widgets sont rangés sous self.<prefixe>_historique,
-        self.<prefixe>_input, self.btn_<prefixe>_send -- voir
-        _build_shion_tab pour l'unique usage actuel (prefixe="shion")."""
-        frame = tk.Frame(self.workspace, bg="#0D0D0D")
-
-        toolbar = tk.Frame(frame, bg="#111111", height=32)
-        toolbar.pack(fill=tk.X, side=tk.TOP)
-        toolbar.pack_propagate(False)
-        label_titre = tk.Label(
-            toolbar, text=titre,
-            bg="#111111", fg=couleur_titre, font=("Consolas", 9, "bold"),
-        )
-        label_titre.pack(side=tk.LEFT, padx=10, pady=6)
-        setattr(self, prefixe + "_titre_label", label_titre)
-        tk.Button(
-            toolbar, text="🗑 Nouvelle conversation",
-            bg="#111111", fg="#555555", activebackground="#222222",
-            activeforeground="#FF4444", relief=tk.FLAT,
-            font=("Consolas", 9), cursor="hand2",
-            command=on_reset,
-        ).pack(side=tk.RIGHT, padx=10, pady=4)
-
-        historique_frame = tk.Frame(frame, bg="#050505")
-        historique_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
-        historique = tk.Text(
-            historique_frame, bg="#000000", fg="#D8FFE8",
-            insertbackground="#00FF00", font=("Consolas", 10),
-            relief=tk.FLAT, wrap=tk.WORD, state=tk.DISABLED,
-            padx=10, pady=10,
-        )
-        historique.pack(fill=tk.BOTH, expand=True)
-        historique.tag_configure("vous", foreground="#00FFFF", font=("Consolas", 10, "bold"))
-        historique.tag_configure("assistant", foreground=couleur_reponse, font=("Consolas", 10, "bold"))
-        historique.tag_configure("erreur", foreground="#FF4444")
-        historique.tag_configure("corps", foreground="#D8FFE8")
-        setattr(self, prefixe + "_historique", historique)
-
-        saisie_frame = tk.Frame(frame, bg="#0D0D0D")
-        saisie_frame.pack(fill=tk.X, padx=10, pady=10)
-        saisie = tk.Entry(
-            saisie_frame, bg="#111111", fg="#D8FFE8",
-            insertbackground="#00FF00", relief=tk.FLAT,
-            font=("Consolas", 11),
-        )
-        saisie.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, padx=(0, 8))
-        saisie.bind("<Return>", lambda e: on_send())
-        setattr(self, prefixe + "_input", saisie)
-
-        bouton = tk.Button(
-            saisie_frame, text="Envoyer ➤",
-            bg="#00FF00", fg="#000000", activebackground="#33FF33",
-            disabledforeground="#444444", relief=tk.FLAT,
-            font=("Consolas", 10, "bold"), cursor="hand2",
-            command=on_send,
-        )
-        bouton.pack(side=tk.RIGHT, ipadx=10, ipady=4)
-        setattr(self, "btn_" + prefixe + "_send", bouton)
-        return frame
-
+    # _build_chat_panel (fabrique de panneau de discussion générique) a
+    # été retirée avec _build_shion_tab, son unique appelant -- elle
+    # n'était plus jamais invoquée nulle part ailleurs (_build_colonne_shion,
+    # la colonne de droite toujours en usage, construit ses propres
+    # widgets directement, sans passer par cette fabrique).
     def _chat_append(self, prefixe: str, texte: str, tag: str, entete: str = ""):
         """Ajoute une entrée dans l'historique du panneau `prefixe`.
 
@@ -12436,7 +14376,47 @@ class UVIIDE:
         historique.config(state=tk.DISABLED)
         historique.see(tk.END)
 
-    def _chat_send(self, prefixe: str, client, nom_repondeur: str):
+    def _construire_contexte_langage_uvi(self) -> str:
+        """Bloc de contexte optionnel pour SHION : référence du langage
+        (UVI_REFERENCE_LANGAGE) + code actuel de l'éditeur + son AST RÉEL,
+        produit par le vrai parseur UVI (self.engine.parser), pas par SHION
+        lui-même -- voir la case « Inclure le code + AST de l'éditeur » de
+        _build_shion_tab, qui déclenche cet enrichissement dans _chat_send.
+
+        POURQUOI L'AST ET PAS SEULEMENT LE CODE SOURCE : lui montrer le
+        texte seul laisse SHION deviner la syntaxe par analogie avec un
+        langage connu -- justement la source d'erreur qu'UVI_REFERENCE_LANGAGE
+        cherche à éviter. L'AST est la sortie du VRAI parseur : aucune
+        réinterprétation possible, juste la structure telle qu'UVI l'a
+        effectivement comprise (via Parser.program_to_json, déjà utilisé
+        par IAAgent.export_ast pour le même besoin côté humain).
+
+        Troncature volontaire : le serveur local tourne avec un contexte de
+        4096 tokens (voir docs/SERVEUR_LOCAL_CPU.md) -- un script long,
+        une fois transformé en JSON d'AST (souvent 3 à 5x plus verbeux que
+        le source), l'épuiserait à lui seul, sans laisser de place à la
+        réponse."""
+        code = self.editor.get("1.0", tk.END).rstrip()
+        if not code.strip():
+            return UVI_REFERENCE_LANGAGE + "\n(Éditeur vide -- aucun code à analyser.)"
+        try:
+            noeuds = self.engine.parser.parse_program(code.splitlines())
+            ast_json = self.engine.parser.program_to_json(noeuds)
+        except Exception as e:
+            ast_json = "(échec de l'analyse syntaxique : %s)" % e
+        code_tronque = code if len(code) <= 3000 else code[:3000] + "\n... (tronqué)"
+        ast_tronque = ast_json if len(ast_json) <= 6000 else ast_json[:6000] + "\n... (tronqué)"
+        return (
+            UVI_REFERENCE_LANGAGE
+            + "\n[Code source UVI actuel de l'éditeur]\n```\n%s\n```\n" % code_tronque
+            + "\n[AST réel de ce code, produit par le parseur UVI -- source "
+              "de vérité structurelle, pas une reformulation]\n```json\n%s\n```"
+            % ast_tronque
+        )
+
+    def _chat_send(self, prefixe: str, client, nom_repondeur: str,
+                   question: Optional[str] = None,
+                   prompt_envoye: Optional[str] = None):
         """Envoi non bloquant commun aux deux onglets de discussion.
 
         La requête réseau (LLMClient.complete, bloquante -- urllib avec
@@ -12452,24 +14432,40 @@ class UVIIDE:
         Le retour au thread principal passe par _poster_ui (file
         d'attente) : rien de ce qui touche un widget ne s'exécute depuis le
         thread worker, pas même un root.after -- qui est lui-même un appel
-        Tcl et donc soumis à la même contrainte."""
+        Tcl et donc soumis à la même contrainte.
+
+        `question`/`prompt_envoye` : envoi PROGRAMMATIQUE (voir action_shion),
+        sans passer par le champ de saisie. `question` est ce qui s'affiche
+        dans l'historique (COURT, lisible) ; `prompt_envoye` (par défaut
+        identique à `question` si omis) est ce qui part réellement au
+        modèle -- peut être bien plus long (référence du langage UVI + AST,
+        voir _construire_contexte_langage_uvi) sans polluer l'historique
+        affiché. Sans ces paramètres (appel interactif normal), les deux
+        sont identiques et lus depuis le champ de saisie."""
         saisie = getattr(self, prefixe + "_input")
         bouton = getattr(self, "btn_" + prefixe + "_send")
-        question = saisie.get().strip()
+        interactif = question is None
+        if interactif:
+            question = saisie.get().strip()
         if not question:
             return
         if client is None:
             self._chat_append(prefixe, "Service non configuré (voir le message ci-dessus).", "erreur")
             return
+        if prompt_envoye is None:
+            prompt_envoye = question
 
-        saisie.delete(0, tk.END)
+        if interactif:
+            saisie.delete(0, tk.END)
         self._chat_append(prefixe, question, "vous", entete="Vous :")
         saisie.config(state=tk.DISABLED)
         bouton.config(state=tk.DISABLED)
+        if getattr(self, "shion_avatar", None) is not None:
+            self.shion_avatar.react("USER_MESSAGE_SENT")
 
         def _worker():
             try:
-                reponse = client.complete(question)
+                reponse = client.complete(prompt_envoye)
                 erreur = None
             except LLMClientError as e:
                 # LLMClientError couvre tous les backends (DeepSeekClientError,
@@ -12484,8 +14480,12 @@ class UVIIDE:
             def _apply():
                 if erreur is not None:
                     self._chat_append(prefixe, erreur, "erreur")
+                    if getattr(self, "shion_avatar", None) is not None:
+                        self.shion_avatar.react("ERROR_OCCURRED")
                 else:
                     self._chat_append(prefixe, reponse, "assistant", entete=nom_repondeur + " :")
+                    if getattr(self, "shion_avatar", None) is not None:
+                        self.shion_avatar.react("USER_MESSAGE_RECEIVED")
                 saisie.config(state=tk.NORMAL)
                 bouton.config(state=tk.NORMAL)
                 saisie.focus_set()
@@ -12496,45 +14496,17 @@ class UVIIDE:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _build_shion_tab(self):
-        """Onglet de discussion SHION : troisième vue du workspace (voir
-        _VUES), même mécanisme de bascule que ÉDITEUR/CANEVAS.
-
-        Avant, SHION n'était accessible QUE par l'instruction SHION.ASK
-        dans un script -- pour poser une question il fallait écrire un
-        programme, l'enregistrer et l'exécuter. Cet onglet donne un accès
-        direct, en discussion, à la MÊME instance et au MÊME historique que
-        SHION.ASK en script (self.engine.shion_client) -- une question
-        posée ici est dans le contexte du script exécuté ensuite, et
-        réciproquement.
-
-        (L'onglet ERIS, assistant Gemini séparé, a été retiré : SHION
-        couvre déjà son rôle sans dépendre d'une clé API personnelle. La
-        syntaxe !ERIS(...) reste utilisable dans un script -- voir
-        _eval_expr_or_eris -- mais répond désormais toujours via SHION.)"""
-        self.frame_shion = self._build_chat_panel(
-            prefixe="shion",
-            titre="🧠 SHION — %s" % (
-                self.engine.shion_client.nom_affichage
-                if self.engine.shion_client is not None else "non configuré"
-            ),
-            couleur_titre="#00FF00" if self.engine.shion_client is not None else "#FF4444",
-            on_send=self._shion_send_message,
-            on_reset=self._shion_reset_conversation,
-        )
-        if self.engine.shion_client is None:
-            self._chat_append(
-                "shion",
-                "SHION n'est pas configuré ici (le paquet shion/ est-il bien "
-                "présent à côté de uvi_core.py ?). Avec SHION_BACKEND=deepseek, "
-                "lancez plutôt un serveur vLLM servant DeepSeek-R1-Distill-"
-                "Qwen-7B et exportez SHION_SERVER_URL (ex. "
-                "http://192.168.1.50:8000) avant de relancer UVI -- voir "
-                "docs/SERVEUR_DEEPSEEK.md pour la commande exacte. Aucune clé "
-                "personnelle n'est nécessaire dans un cas comme dans l'autre.",
-                "erreur",
-            )
-
+    # _build_shion_tab (troisième vue du workspace, à côté de CANEVAS) a
+    # été RETIRÉE : elle partageait les noms self.shion_input/
+    # self.shion_historique/btn_shion_send avec _build_colonne_shion (la
+    # colonne de droite, construite APRÈS elle dans _build_container), qui
+    # les écrasait systématiquement -- cet onglet était donc mort depuis
+    # sa création, son propre champ de saisie et son historique n'ayant
+    # jamais reçu la moindre interaction réelle (voir l'ancienne "NOTE
+    # D'ARCHITECTURE" à cet endroit, qui documentait déjà ce constat sans
+    # le corriger). _shion_send_message/_shion_reset_conversation restent
+    # : la colonne de droite (seule survivante, seule jamais réellement
+    # utilisée) les appelle toujours -- voir _build_colonne_shion.
     def _shion_send_message(self):
         self._chat_send("shion", self.engine.shion_client, "SHION")
 
@@ -12633,6 +14605,8 @@ class UVIIDE:
         self._marquer_enregistre(nom)
         self.log("Sauvegardé : %s" % chemin, "ok")
         self._set_status("Sauvegardé — %s" % nom)
+        if getattr(self, "shion_avatar", None) is not None:
+            self.shion_avatar.react("FILE_SAVED")
 
     def update_vfs_list(self):
         """Explorateur en arborescence (maquette v9).
@@ -12708,6 +14682,8 @@ class UVIIDE:
         self.show_editor()
         self._marquer_enregistre(nom)
         self._set_status("%s chargé." % nom)
+        if getattr(self, "shion_avatar", None) is not None:
+            self.shion_avatar.react("FILE_OPENED")
 
     def _define_tags(self):
         """Coloration syntaxique v9.
@@ -12850,7 +14826,7 @@ class UVIIDE:
     # l'éditeur (voir _build_container). L'y laisser aurait fait
     # pack_forget() la console à chaque changement de vue -- elle aurait
     # disparu au premier clic sur CANEVAS pour ne jamais revenir.
-    _VUES = ("editor", "canvas", "shion")
+    _VUES = ("editor", "canvas")
 
     def _show_view(self, nom: str):
         """Bascule vers une vue du workspace (pack_forget des autres, pack
@@ -12874,7 +14850,6 @@ class UVIIDE:
             frame_active.pack(fill=tk.BOTH, expand=True)
         boutons = {
             "editor": "btn_edit", "terminal": "btn_term", "canvas": "btn_canvas",
-            "shion": "btn_shion",
         }
         for vue, nom_attr in boutons.items():
             bouton = getattr(self, nom_attr, None)
@@ -12907,6 +14882,7 @@ class UVIIDE:
         qui vit juste en dessous) au premier plan à chaque appel -- c'est
         ce qui manquait pour que « basculer sur le terminal » veuille
         vraiment dire quelque chose."""
+        self._assurer_dock_ouvert()
         self._show_view("editor")
         self._selectionner_onglet_console("CONSOLE UVI")
         try:
@@ -12918,10 +14894,6 @@ class UVIIDE:
 
     def show_canvas(self):
         self._show_view("canvas")
-
-    def show_shion(self):
-        self._show_view("shion")
-        self.shion_input.focus_set()
 
     # ---------------------------------------------------------------
     # ÉTAPE 6 -- déclenchement de IAAgent.autonomous_fix depuis l'IDE
@@ -13145,6 +15117,12 @@ class UVIIDE:
     def _ouvrir_saisie(self, var_name):
         """Affiche la barre de saisie. Thread principal uniquement."""
         self.is_waiting_input = True
+        # Rouvre le dock s'il a été replié (voir _assurer_dock_ouvert) --
+        # AVANT tout le reste : barre_saisie (plus bas) VIT dans le dock,
+        # la rouvrir alors que le dock est replié la laisserait empaquetée
+        # mais invisible, soit exactement le bug déjà corrigé une fois
+        # pour cette même barre (voir le commentaire BUGFIX plus bas).
+        self._assurer_dock_ouvert()
         # Ramène aussi la vue CENTRALE sur l'éditeur (même raison que le
         # correctif de show_terminal juste au-dessus) : un script qui
         # dessine (CANEVAS affiché, cf. run_script/run_script_vm) puis
@@ -13366,11 +15344,11 @@ class UVIIDE:
         """Bascule l'apparence du bouton principal."""
         try:
             if actif:
-                self.btn_run.config(text="⏹  ARRÊTER", bg="#B91C1C",
+                self.btn_run.config(text=self._t("⏹  ARRÊTER"), bg="#B91C1C",
                                     activebackground=T.ROUGE,
                                     state=tk.NORMAL, cursor="hand2")
             else:
-                self.btn_run.config(text="▶  EXÉCUTER", bg=T.BLEU,
+                self.btn_run.config(text=self._t("▶  EXÉCUTER"), bg=T.BLEU,
                                     activebackground=T.BLEU_VIF,
                                     state=tk.NORMAL, cursor="hand2")
         except tk.TclError:
@@ -13380,6 +15358,7 @@ class UVIIDE:
         if self.engine.is_running:
             return
         self.engine.stop_requested = False
+        self.engine._stop_line = 0
         code = self.editor.get("1.0", tk.END)
         lines = code.splitlines()
         if not lines or lines[0].strip() != "@UVI":
@@ -13422,6 +15401,8 @@ class UVIIDE:
         )
         self.log(f"=== SÉQUENCE D'EXÉCUTION — {ts} ===", "sys")
         self._set_status("Exécution en cours…")
+        if getattr(self, "shion_avatar", None) is not None:
+            self.shion_avatar.react("TASK_STARTED")
 
         def _run():
             self.engine.run_sequence(lines[1:])
@@ -13445,8 +15426,13 @@ class UVIIDE:
             pass  # arrêt volontaire : aucune notification, l'utilisateur sait déjà
         elif self.engine.error_flag:
             self._empiler_toast("Le script s'est terminé en erreur.", "err")
-        elif duree > 1.5:
-            self._empiler_toast("Script terminé (%.1f s)." % duree, "ok")
+            if getattr(self, "shion_avatar", None) is not None:
+                self.shion_avatar.react("TASK_FAILED")
+        else:
+            if duree > 1.5:
+                self._empiler_toast("Script terminé (%.1f s)." % duree, "ok")
+            if getattr(self, "shion_avatar", None) is not None:
+                self.shion_avatar.react("TASK_COMPLETED")
         # CORRIGÉ AU PASSAGE : ce bloc remettait le bouton en #00FF00 sur
         # #000000 -- les couleurs de l'ancien thème vert v8. Après la
         # première exécution, le bouton principal virait donc au vert fluo
@@ -13454,6 +15440,7 @@ class UVIIDE:
         # thème, que seule une exécution réelle faisait apparaître.
         self._mode_execution(False)
         self.engine.stop_requested = False
+        self.engine._stop_line = 0
         self.cmd_input.config(state=tk.NORMAL)
         self._rafraichir_panneaux()
 
@@ -13522,6 +15509,22 @@ class UVIIDE:
             draw_fn=self.canvas_draw,
             key_down_fn=self.key_is_down,
             key_pressed_fn=self.key_was_pressed,
+            # Sans ces trois kwargs, la VM retombe sur ses défauts de classe
+            # (max_string_length=1 000 000, max_call_depth=100,
+            # max_array_size=10 000) -- très au-dessus des plafonds du
+            # tree-walker (MAX_STRING_LENGTH=10 000, MAX_CALL_DEPTH=50,
+            # MAX_ARRAY_SIZE=1 000, voir plus haut dans ce fichier). Un même
+            # script pouvait donc dépasser silencieusement la limite dans
+            # UN moteur mais pas l'autre -- exactement le genre d'écart que
+            # _lancer_tests (onglet TESTS) est censé détecter, sauf que
+            # cette divergence-là ne se manifeste que sur un script qui
+            # pousse délibérément une chaîne/récursion/tableau au-delà du
+            # plafond, donc rarement rencontrée par hasard. Faire pointer
+            # les deux moteurs vers LES MÊMES constantes élimine la dérive,
+            # plutôt que de la corriger une fois constatée.
+            max_string_length=MAX_STRING_LENGTH,
+            max_call_depth=MAX_CALL_DEPTH,
+            max_array_size=MAX_ARRAY_SIZE,
         )
 
         # BUGFIX (gel de l'IDE, + deadlock sur ?INPUT) : vm.run() était
@@ -13570,6 +15573,7 @@ class UVIIDE:
                 # rebinde donc l'exception à un nom ordinaire AVANT de
                 # construire la closure, pour ne pas répéter le même bug.
                 exc = e
+                _signaler_crash(exc, source="vm", error_code="VM_CRASH")
                 self._poster_ui(lambda: self._on_vm_finished(None, exc))
                 return
             self._poster_ui(lambda: self._on_vm_finished(resultat, None))
@@ -13761,6 +15765,14 @@ class UVIIDE:
         # pendant la fermeture.
         if getattr(self.engine, "is_running", False):
             self.engine.stop_requested = True
+        if getattr(self, "shion_avatar", None) is not None:
+            self.shion_avatar.arreter()
+        # Sous-processus llama.cpp lancé par _definir_modele_local (le cas
+        # échéant) : sans cet arrêt explicite, il continuerait à tourner
+        # après la fermeture de l'IDE -- un serveur invisible qui consomme
+        # RAM/CPU sans qu'on sache pourquoi, jusqu'au prochain redémarrage.
+        if getattr(self, "_processus_llm_local", None) is not None:
+            self._arreter_modele_local(silencieux=True)
         self.root.destroy()
 
     def start(self):

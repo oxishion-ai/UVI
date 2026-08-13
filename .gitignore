@@ -11,3 +11,30 @@ __pycache__/
 # aucun intérêt à le versionner -- peut peser plusieurs centaines de Mo
 # pour Shion-Micro/Base.
 shion/weights/*/_optimizer_state/
+
+# Poids GGUF téléchargés (voir docs/SERVEUR_LOCAL_CPU.md) : plusieurs Go,
+# re-téléchargeables depuis Hugging Face, aucun intérêt à versionner.
+models/*.gguf
+
+# Rapports de bugs locaux (voir bug_reports.py) : propres à la machine et
+# à la session de CHAQUE utilisateur, jamais versionnés -- même s'ils ne
+# contiennent structurellement aucun code utilisateur (voir la docstring
+# de bug_reports.py), ce sont des données d'exécution locales, pas du code.
+bug_reports/
+
+# Préférences locales de l'IDE (langue de l'interface, session de
+# connexion -- voir UVIIDE._charger_langue_sauvegardee et uvi_auth.py) :
+# propre à CHAQUE utilisateur, jamais versionné.
+.uvi_prefs.json
+
+# Sorties de build de l'empaquetage Windows (voir
+# docs/EMPAQUETAGE_WINDOWS.md) : régénérées par PyInstaller/Inno Setup,
+# potentiellement des centaines de Mo, aucun intérêt à versionner.
+packaging/build/
+packaging/dist/
+packaging/dist_installer/
+
+# Métadonnées locales du CLI Supabase (supabase link) : propres à la
+# machine de CHAQUE développeur, jamais versionnées -- convention standard
+# des projets Supabase.
+supabase/.temp/
