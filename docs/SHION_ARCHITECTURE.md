@@ -87,9 +87,11 @@ inverse était sur la table :
 
 | Palier | Paramètres (mesuré) | Taille INT4 | d_model | Couches | Têtes | Fenêtre | Statut dans ce dépôt |
 |---|---:|---:|---:|---:|---:|---:|---|
-| **Shion-Nano** | **115 264** | **0,06 Mo** | 64 | 2 | 4 | 64 | **Livré, entraîné, testé** (`shion/weights/shion-nano/`) |
-| Shion-Micro | 14 262 144 | 7,13 Mo | 384 | 8 | 6 | 256 | Décrit, config prête, **non entraîné** (voir §10) |
-| Shion-Base | 201 626 624 | 100,81 Mo | 1024 | 16 | 16 | 1024 | Décrit, config prête, **non entraîné** (voir §10) |
+| **Shion-Nano** | **468 000** | **0,23 Mo** | 96 | 3 | 4 | 80 | **Livré, entraîné, testé** (`shion/weights/shion-nano/`) |
+| Shion-Micro | 18 980 736 | 9,49 Mo | 384 | 8 | 6 | 256 | **Livré, entraîné** (`shion/weights/shion-micro/` — 3 itérations, la dernière lr=1e-3/20 000 pas/corpus 89 Ko ; qualité non mesurée ici, voir §10) |
+| Shion-Base | 268 735 488 | 134,37 Mo | 1024 | 16 | 16 | 1024 | Décrit, config prête, **non entraîné** (voir §10) |
+
+*(Ligne Nano corrigée une première fois lors d'une relecture antérieure : la table indiquait encore 115 264 paramètres / d_model=64 / 2 couches / fenêtre=64, la topologie D'AVANT la recalibration décrite dans `shion/config.py`. Les TROIS lignes re-corrigées lors d'une relecture ultérieure : `ShionConfig.param_count()` sous-comptait le MLP SwiGLU d'un facteur constant (oubliait la contribution de W_out, voir le commentaire de param_count()) -- écart trouvé en important les VRAIS tenseurs du checkpoint shion-nano livré pour un export web, dont la somme réelle ne correspondait pas au chiffre alors documenté ici.)*
 
 Pourquoi ces trois-là précisément, et pas un seul « le plus gros
 possible » :
@@ -522,7 +524,7 @@ supplémentaire. C'est le mode par défaut d'UVI (`SHION_BACKEND=shion`,
 §9) : ouvrir l'IDE et taper `SHION.ASK` fonctionne sans qu'aucun serveur
 n'ait été démarré. Empreinte : un seul interpréteur Python, la RAM bornée
 par `max_resident_layers` (§6), le disque par la taille quantifiée du
-checkpoint (0,06 Mo pour Nano, §1).
+checkpoint (0,23 Mo pour Nano, §1).
 
 ### Palier 2 — Serveur dédié local ou LAN (usage partagé)
 
@@ -552,8 +554,8 @@ Ce qui rend ce palier réaliste, listé dans l'ordre où il compte :
    (Android) et un Raspberry Pi, déjà les cibles explicites documentées
    ailleurs dans ce dépôt (`ShionServingClient`/`serving.py` historique).
    Aucune compilation CUDA, aucun runtime GPU.
-2. **Poids quantifiés minuscules.** Shion-Nano : 0,06 Mo. Shion-Micro
-   (cible réaliste pour un usage quotidien, §1) : 7,13 Mo — tient sur
+2. **Poids quantifiés minuscules.** Shion-Nano : 0,23 Mo. Shion-Micro
+   (cible réaliste pour un usage quotidien, §1) : 9,49 Mo — tient sur
    n'importe quel stockage, y compris embarqué.
 3. **RAM bornée par construction, pas par accident.** `max_resident_
    layers` (§6) est un paramètre explicite : sur un appareil à 512 Mo de
@@ -613,11 +615,19 @@ moteur Shion embarqué — sans serveur externe, sans configuration.
   (quantification, pagination mémoire, fenêtre glissante, entraînement
   vérifié par gradient-check, service HTTP), pas la qualité du modèle
   Nano lui-même.
-- **Shion-Micro/Base ne sont pas entraînés.** Leur config existe et leur
-  nombre de paramètres est calculé exactement (§1), mais les entraîner
-  jusqu'à une qualité utile demande un vrai corpus (distillation à
-  grande échelle, §7.1) et des heures/jours de calcul CPU — hors du
-  périmètre d'une session.
+- **Shion-Base n'est pas entraîné.** Sa config existe et son nombre de
+  paramètres est calculé exactement (§1), mais l'entraîner jusqu'à une
+  qualité utile demande un vrai corpus (distillation à grande échelle,
+  §7.1) et des heures/jours de calcul CPU — hors du périmètre d'une
+  session.
+- **Shion-Micro EST désormais entraîné** (`shion/weights/shion-micro/`,
+  3 itérations en historique git, la dernière lr=1e-3/20 000 pas sur un
+  corpus de 89 Ko) — mais sa qualité n'est **pas mesurée dans ce
+  document** (pas de courbe de perte ni d'échantillon de génération
+  rapportés ici, contrairement à Nano juste au-dessus). Cette ligne
+  disait encore "non entraîné" avant une relecture ultérieure du dépôt ;
+  ne pas supposer l'un ou l'autre statut sans vérifier
+  `shion/weights/shion-micro/meta.json` directement.
 - **Le noyau Rust n'est pas codé** (§2.3) — spécifié précisément pour
   qu'un portage soit un remplacement mécanique de `shion/engine.py`, pas
   une refonte d'architecture.

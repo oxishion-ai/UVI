@@ -27,6 +27,29 @@ from .engine import ShionEngine
 
 _engine: "ShionEngine | None" = None
 _model_name = "shion"
+
+# BUGFIX (déni de service réseau) : ce serveur écoute sur 0.0.0.0 par
+# défaut (voir --host plus bas, partage LAN volontaire) -- do_POST lisait
+# `self.rfile.read(longueur)` avec `longueur` pris TEL QUEL depuis
+# l'en-tête Content-Length envoyé par le client, et `max_tokens` TEL QUEL
+# depuis le corps JSON, sans aucun plafond. N'importe qui joignant le
+# port pouvait donc annoncer un Content-Length de plusieurs Go (RAM
+# engloutie par rfile.read avant même le parsing JSON) ou un
+# max_tokens=10**9 (la boucle de génération de ShionEngine.generate ne
+# s'arrête qu'à max_new_tokens ou <eos> -- jamais sur un budget de temps),
+# et ce sous le verrou global `_lock` : une seule requête malveillante
+# bloque TOUS les autres utilisateurs du LAN indéfiniment, pas seulement
+# son propre auteur. MAX_STRING_LENGTH (uvi_core.py) protège déjà le
+# chemin SHION.ASK -> ShionServingClient, mais ce serveur HTTP répond à
+# N'IMPORTE QUEL client compatible OpenAI, pas seulement à uvi_core.py --
+# il a besoin de sa PROPRE borne, indépendante.
+_MAX_REQUEST_BYTES = 2_000_000   # ~2 Mo : large marge pour un historique de
+                                  # conversation multi-tours légitime, tout en
+                                  # bornant la RAM que rfile.read() peut engager.
+_MAX_NEW_TOKENS = 4096            # tokens = octets ici (tokenizer.py) ; grand
+                                  # devant le défaut (200) et devant
+                                  # max_seq_len de Shion-Base (4096), mais fini.
+
 # ShionEngine.cache (LazyLayerCache) n'est pas pensé pour des accès
 # concurrents (éviction LRU = état mutable partagé) -- un verrou global
 # suffit pour l'usage visé ("une poignée d'utilisateurs sur un LAN"), pas
@@ -63,6 +86,15 @@ class ShionRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             longueur = int(self.headers.get("Content-Length", "0"))
+        except Exception as e:
+            self._send_json({"object": "error", "message": "en-tête Content-Length invalide : %s" % e}, 400)
+            return
+        if longueur > _MAX_REQUEST_BYTES:
+            self._send_json(
+                {"object": "error", "message": "corps de requête trop volumineux (%d octets, max %d)"
+                 % (longueur, _MAX_REQUEST_BYTES)}, 413)
+            return
+        try:
             corps = json.loads(self.rfile.read(longueur).decode("utf-8"))
         except Exception as e:
             self._send_json({"object": "error", "message": "corps JSON invalide : %s" % e}, 400)
@@ -85,9 +117,23 @@ class ShionRequestHandler(BaseHTTPRequestHandler):
             else:
                 i += 1
 
-        temperature = float(corps.get("temperature", 0.8))
-        top_p = float(corps.get("top_p", 0.9))
-        max_tokens = int(corps.get("max_tokens", 200))
+        try:
+            temperature = float(corps.get("temperature", 0.8))
+            top_p = float(corps.get("top_p", 0.9))
+            # BUGFIX (crash par requête) : max_tokens venait tel quel du
+            # client -- un client malveillant ou juste buggé (ce serveur
+            # répond à n'importe quel client OpenAI-compatible, pas
+            # seulement à uvi_core.py) pouvait viser une génération
+            # arbitrairement longue, ce qui, cumulé au verrou global
+            # `_lock`, bloquait tous les autres utilisateurs du LAN
+            # pendant toute la durée de cette unique requête. Plafonné à
+            # _MAX_NEW_TOKENS ; max(1, ...) évite un range() vide silencieux
+            # côté engine.generate si max_tokens<=0 était envoyé.
+            max_tokens = min(max(1, int(corps.get("max_tokens", 200))), _MAX_NEW_TOKENS)
+        except (TypeError, ValueError) as e:
+            self._send_json(
+                {"object": "error", "message": "temperature/top_p/max_tokens invalides : %s" % e}, 400)
+            return
 
         with _lock:
             try:

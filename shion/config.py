@@ -10,20 +10,34 @@ attendues avant de dé-quantifier).
 Trois paliers sont documentés (voir docs/SHION_ARCHITECTURE.md §1 pour le
 raisonnement complet derrière chaque taille) :
 
-  NANO  — ~0,1 M paramètres. C'est la SEULE taille livrée avec un
-          checkpoint entraîné dans ce dépôt (shion/weights/shion-nano.*).
-          Tourne sur n'importe quoi, y compris un Raspberry Pi, en
-          quelques millisecondes par token. Sert de PREUVE D'ARCHITECTURE
-          (le pipeline bout en bout fonctionne réellement) plutôt que
-          d'assistant compétent — voir l'avertissement dans README de ce
-          paquet et dans le document d'architecture.
-  MICRO — ~25 M paramètres. Cible réaliste pour des réponses courtes
-          cohérentes sur CPU modeste, DÉCRITE mais pas entraînée ici :
+  NANO  — ~0,47 M paramètres (468 000 exactement -- voir param_count(),
+          dont la formule MLP a été corrigée lors de cette relecture, voir
+          son propre commentaire : le terme W_out du SwiGLU était oublié,
+          sous-comptant les trois paliers d'environ 30%). C'est la SEULE
+          taille livrée avec un checkpoint entraîné DÈS le commit initial
+          dans ce dépôt (shion/weights/shion-nano.*) -- shion-micro (voir
+          juste dessous) en a depuis un aussi, mais entraîné dans un
+          commit ultérieur, pas dans celui-ci. Tourne sur n'importe quoi,
+          y compris un Raspberry Pi, en quelques millisecondes par token.
+          Sert de PREUVE D'ARCHITECTURE (le pipeline bout en bout
+          fonctionne réellement) plutôt que d'assistant compétent — voir
+          l'avertissement dans README de ce paquet et dans le document
+          d'architecture.
+  MICRO — ~19,0 M paramètres (18 980 736 exactement). Cible réaliste pour
+          des réponses courtes cohérentes sur CPU modeste. DÉSORMAIS
+          ENTRAÎNÉE dans ce dépôt aussi (shion/weights/shion-micro/,
+          voir l'historique git : 3 itérations, la dernière sur
+          lr=1e-3/20 000 pas/corpus de 89 Ko) -- qualité non mesurée dans
+          ce fichier ni dans docs/SHION_ARCHITECTURE.md (dont le §10 disait
+          encore "non entraînée" avant cette relecture ; à re-vérifier par
+          quiconque s'appuie sur cette affirmation plutôt que sur le
+          checkpoint réel).
+  BASE  — ~268,7 M paramètres (268 735 488 exactement). Plafond raisonnable
+          du "bare-metal frugal" avant qu'un GPU ne devienne de facto
+          nécessaire à l'entraînement (même quantifié, l'inférence CPU
+          reste possible mais lente). DÉCRITE mais pas entraînée ici --
           demande un vrai corpus de distillation (voir distill.py) et
           plusieurs heures/jours de calcul, hors de portée d'une session.
-  BASE  — ~300 M paramètres. Plafond raisonnable du "bare-metal frugal"
-          avant qu'un GPU ne devienne de facto nécessaire à l'entraînement
-          (même quantifié, l'inférence CPU reste possible mais lente).
 """
 
 from dataclasses import dataclass
@@ -54,11 +68,25 @@ class ShionConfig:
         """Compte réel des paramètres entraînables (utilisé par train.py
         pour afficher un résumé, et par les tests pour vérifier qu'un
         changement de config ne fait pas dériver silencieusement la taille
-        annoncée dans la doc)."""
+        annoncée dans la doc).
+
+        BUG CORRIGÉ : le terme MLP comptait seulement `2 * d_model * d_ff`
+        (la taille de W_in, dont la sortie fait 2*d_ff -- gate+up du
+        SwiGLU) et OUBLIAIT la contribution de W_out (forme (d_ff,
+        d_model) = d_model*d_ff éléments), pourtant bien présent et
+        entraîné (voir model.py:init_params, "mlp_wout"). Trouvé en
+        important les VRAIS tenseurs du checkpoint shion-nano livré
+        (shion/weights/shion-nano/) pour l'export web mobile : leur somme
+        réelle (468 000 éléments) ne correspondait PAS aux 357 408
+        annoncés ici et dans docs/SHION_ARCHITECTURE.md -- l'écart exact
+        (110 592 = 3 * 96 * 384 = n_layer * d_model * d_ff) confirme qu'il
+        manquait précisément le terme W_out. Les trois paliers documentés
+        (Nano/Micro/Base) avaient tous ce même écart -- voir
+        docs/SHION_ARCHITECTURE.md, corrigé au même endroit."""
         embed = self.vocab_size * self.d_model  # tête de sortie LIÉE (tied) : pas comptée deux fois
         per_layer = (
             4 * self.d_model * self.d_model       # Wq, Wk, Wv, Wo
-            + 2 * self.d_model * self.d_ff         # MLP SwiGLU : W_in (2*d_ff en sortie), W_out
+            + 3 * self.d_model * self.d_ff         # MLP SwiGLU : W_in (2*d_ff en sortie) + W_out (d_ff en entrée)
             + 2 * self.d_model                     # 2 gains RMSNorm (pré-attention, pré-MLP)
         )
         final_norm = self.d_model

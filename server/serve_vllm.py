@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 import types
@@ -70,7 +71,21 @@ sys.argv = [
     "--gpu-memory-utilization", "0.90",
     "--tensor-parallel-size", "1",
     "--reasoning-parser", "deepseek_r1",
-    "--api-key", "ma_cle_api"
+    # BUGFIX (fausse impression de sécurité) : ce serveur écoute sur
+    # 0.0.0.0 (voir --host ci-dessus, nécessaire pour un tunnel
+    # Colab/ngrok) -- la clé --api-key est donc la SEULE barrière avant
+    # qu'un tiers qui trouve l'URL du tunnel puisse consommer le GPU.
+    # Avant ce correctif, cette clé était figée en dur à "ma_cle_api",
+    # IGNORANT complètement la variable d'environnement DEEPSEEK_API_KEY
+    # -- exactement celle que docs/SERVEUR_DEEPSEEK.md §5 et
+    # start_server.sh (l'autre lanceur vLLM du même dossier) utilisent
+    # tous les deux. Un·e utilisateur·rice qui suivait la doc et faisait
+    # `export DEEPSEEK_API_KEY="un-vrai-secret"` avant de lancer CE
+    # script précis obtenait donc un serveur exposé protégé par le
+    # placeholder public connu de quiconque lit ce fichier, pas par son
+    # secret -- silencieusement, sans erreur. os.environ.get(...) avec le
+    # même repli qu'avant préserve le comportement par défaut inchangé.
+    "--api-key", os.environ.get("DEEPSEEK_API_KEY", "ma_cle_api"),
 ]
 
 if launch_func:
