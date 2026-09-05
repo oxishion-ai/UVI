@@ -31,6 +31,19 @@ SetupIconFile=..\assets\uvi_icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Auto-mise-à-jour (voir uvi_updater.py et docs/MISE_A_JOUR.md) : UVI.exe
+; tient un mutex Windows nommé EXACTEMENT pareil (uvi_updater.hold_app_mutex,
+; appelé avant UVIIDE() dans le bloc __main__) tant qu'il tourne. AppMutex
+; permet à Inno Setup de détecter une instance en cours ; CloseApplications
+; la ferme proprement (silencieusement en mode /SILENT, avec confirmation
+; sinon) AVANT d'écrire les nouveaux fichiers -- sans ça, les .pyd/.dll de
+; l'ancienne version resteraient verrouillés et l'installation échouerait.
+; RestartApplications=yes la relance automatiquement une fois la mise à
+; jour posée, pour que uvi_updater.launch_installer n'ait rien d'autre à
+; faire que lancer cet installateur.
+AppMutex=UVI_IDE_RUNNING_MUTEX
+CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"

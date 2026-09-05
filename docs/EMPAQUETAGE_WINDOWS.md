@@ -64,6 +64,11 @@ le site (`web/site/index.html`, actuellement un bouton placeholder
 `uvi_setup.exe` hébergé quelque part, ex. un asset de release GitHub ou un
 lien Netlify direct).
 
+Une fois publié, UVI peut aussi se mettre à jour tout seul (l'utilisateur
+n'a pas besoin de retélécharger `uvi_setup.exe` manuellement à chaque
+version) — voir [MISE_A_JOUR.md](MISE_A_JOUR.md) pour le mécanisme et la
+checklist de publication.
+
 ## 3. Sans Inno Setup : distribution en ZIP
 
 Alternative plus simple, sans outil supplémentaire : zipper directement
