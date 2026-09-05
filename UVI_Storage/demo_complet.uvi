@@ -1,0 +1,143 @@
+@UVI
+# ============================================================
+#  DEMO_COMPLET.UVI -- tour de toutes les fonctionnalites UVI
+# ============================================================
+
+# --- Entrees utilisateur (?nom / ?E.nom / ?R.nom) ----------
+?Nom
+?E.Age
+?R.Taille
+! "Bonjour {Nom} ({Age} ans, {Taille} m) !"
+
+# --- Variables et arithmetique -------------------------------
+Compteur = 0
+Carre = Age * Age
+! "Age au carre : {Carre}"
+
+# --- IF/ELSE (~ cond -> alors | ... || sinon), corps multiples via | ---
+~ Age < 18 -> ! "Tu es mineur" | Statut = "mineur" || ! "Tu es majeur" | Statut = "majeur"
+! "Statut : {Statut}"
+
+# --- FOR (% N -> corps) --------------------------------------
+% 3 -> ! "Iteration FOR" | Compteur = Compteur + 1
+! "Compteur apres FOR : {Compteur}"
+
+# --- WHILE (%% cond -> corps) ---------------------------------
+%% Compteur < 6 -> ! "Iteration WHILE, compteur={Compteur}" | Compteur = Compteur + 1
+
+# --- Fonction (DEF/CALL), resultat dans _retour ----------------
+DEF Carre_de(n) -> _retour = n * n
+CALL Carre_de(7) -> ResultatFonction
+! "Carre de 7 via fonction : {ResultatFonction}"
+
+# --- Routine (*nom -> corps, appel sans arguments) --------------
+*Saluer -> ! "Salut depuis une routine !"
+*Saluer
+
+# --- Tableaux (TAB.*) ---------------------------------------------
+TAB Scores
+TAB.PUSH Scores -> 92
+TAB.PUSH Scores -> 78
+TAB.PUSH Scores -> 65
+TAB.LEN Scores -> NbScores
+! "Nombre de scores : {NbScores}"
+TAB.GET Scores -> 0 -> PremierScore
+! "Premier score : {PremierScore}"
+TAB.SET Scores -> 1 -> 80
+TAB.PRINT Scores
+TAB.POP Scores -> DernierScore
+! "Score retire : {DernierScore}"
+TAB.DEL Scores -> 0
+
+# --- Chaines de caracteres (STR.*) --------------------------------
+Phrase = "  Bonjour tout le monde  "
+STR.TRIM Phrase -> PhraseNette
+STR.UPPER PhraseNette -> PhraseMaj
+STR.LOWER PhraseNette -> PhraseMin
+STR.LEN PhraseNette -> LongueurPhrase
+! "Nette='{PhraseNette}' Maj='{PhraseMaj}' Min='{PhraseMin}' Longueur={LongueurPhrase}"
+STR.CONTAINS PhraseNette -> "monde" -> ContientMonde
+STR.STARTS PhraseNette -> "Bonjour" -> CommenceParBonjour
+STR.ENDS PhraseNette -> "monde" -> FiniParMonde
+! "Contient 'monde' : {ContientMonde}, commence par 'Bonjour' : {CommenceParBonjour}, finit par 'monde' : {FiniParMonde}"
+STR.REPLACE PhraseNette -> "monde" -> "UVI" -> PhraseRemplacee
+! "Remplacee : {PhraseRemplacee}"
+STR.SLICE PhraseNette -> 0 -> 7 -> DebutPhrase
+STR.INDEX PhraseNette -> "monde" -> PositionMonde
+! "Debut='{DebutPhrase}' position de 'monde'={PositionMonde}"
+STR.SPLIT PhraseNette -> " " -> Mots
+TAB.LEN Mots -> NbMots
+! "Nombre de mots : {NbMots}"
+STR.JOIN Mots -> "-" -> PhraseJointe
+! "Jointe : {PhraseJointe}"
+NombreTexte = "42"
+STR.NUM NombreTexte -> NombreConverti
+! "Nombre converti : {NombreConverti}, moitie = {NombreConverti / 2}"
+
+# --- Disque / VFS (&save / &load / &list / &delete) ---------------
+&save "note_demo.uvi" -> "Ceci est une note ecrite par le script."
+&load "note_demo.uvi" -> ContenuNote
+! "Contenu relu : {ContenuNote}"
+&list
+&delete "note_demo.uvi"
+
+# --- Module (bibliotheque standard, EXPORT, acces via alias::nom) -----
+# "std:math" est toujours disponible : l'IDE installe automatiquement
+# UVI_Storage/.stdlib/math.uvi au demarrage (ensure_stdlib_installed).
+# Note : alias::nom fonctionne directement dans une instruction (!, CALL,
+# affectation), mais pas a l'interieur d'une interpolation {alias::nom} --
+# on passe donc par une variable intermediaire avant d'interpoler.
+MODULE "std:math" -> Maths
+PiDuModule = Maths::PI
+! "Pi du module : {PiDuModule}"
+CALL Maths::CARRE(9) -> ResultatModule
+! "Carre de 9 via module : {ResultatModule}"
+
+# --- Import textuel (meme portee, pas d'alias) ---------------------
+&save "constantes_demo.uvi" -> "ConstanteImportee = 100"
+IMPORT "constantes_demo.uvi"
+! "Constante importee : {ConstanteImportee}"
+&delete "constantes_demo.uvi"
+
+# --- Canevas graphique (DRAW.*) -- necessite l'IDE (canevas reel) ---
+# ATTENTION : PAS de fleche entre le nom de la commande et son PREMIER
+# operande (contrairement aux operandes suivants). Ecrire
+# "DRAW.RECT -> 20 -> ..." cree un premier operande VIDE, lu comme 0, et
+# decale tous les autres d'un cran : la largeur devient la hauteur, la
+# couleur devient une taille, et le dessin est faux SANS message d'erreur.
+# Meme regle que TAB.PUSH / STR.UPPER / DRAW.POLY plus bas.
+DRAW.CLEAR
+DRAW.COLOR "#0B1220"
+DRAW.RECT 20 -> 20 -> 120 -> 80 -> "#3B82F6" -> "#3B82F6"
+DRAW.CIRCLE 200 -> 60 -> 40 -> "#22D3EE"
+DRAW.LINE 20 -> 150 -> 300 -> 150 -> "#A855F7" -> 3
+DRAW.TEXT 20 -> 170 -> "UVI dessine !" -> "#EAF2FF" -> 14
+TAB Triangle
+TAB.PUSH Triangle -> 250
+TAB.PUSH Triangle -> 200
+TAB.PUSH Triangle -> 300
+TAB.PUSH Triangle -> 260
+TAB.PUSH Triangle -> 200
+TAB.PUSH Triangle -> 260
+DRAW.POLY Triangle -> "#F59E0B" -> "#F59E0B"
+
+# --- Clavier (KEY.*) -- necessite l'IDE (focus clavier reel) --------
+KEY.DOWN "Right" -> ToucheDroiteEnfoncee
+KEY.PRESSED "Space" -> ToucheEspacePressee
+~ ToucheDroiteEnfoncee == 1 -> ! "Fleche droite enfoncee !" || ! "Fleche droite relachee"
+
+# --- Pause (sleep) ---------------------------------------------------
+! "Pause d'une demi-seconde..."
+_0.5
+! "Repris apres la pause."
+
+# --- Assistant IA integre (SHION.ASK) ---------------------------------
+SHION.ASK "Explique UVI en une phrase." -> ReponseShion
+
+# --- Auto-correction (LEARN) -------------------------------------------
+!LEARN "erreur type frequente" "correction suggeree"
+
+# --- Arret anticipe (@STOP) -- doit etre la derniere instruction -------
+! "Fin normale du script."
+@STOP
+! "Cette ligne ne doit jamais s'afficher (apres @STOP)."

@@ -137,6 +137,28 @@ def test_str_split_of_single_char_agrees():
     assert_engines_agree('STR.SPLIT "" -> "," -> t\nTAB.LEN t -> n\n! n')
 
 
+def test_str_num_agrees():
+    # Divergence reelle trouvee et corrigee : STR.NUM etait geree cote VM
+    # (CALL_BUILTIN "STR_NUM") mais absente du elif de UVIEvaluator._exec_str,
+    # qui tombait silencieusement dans le `return ""` final sans jamais
+    # appeler _safe_store -- la variable de destination restait non definie
+    # cote tree-walker (donc "" une fois relue) alors que la VM convertissait
+    # correctement en int/float. Verifie ici les deux issues (entier et
+    # reel) pour que la regression ne puisse pas revenir sur l'un des deux
+    # chemins de STR_NUM sans faire echouer ce test.
+    assert_engines_agree('STR.NUM "42" -> n\n! n\n! n / 2')
+    assert_engines_agree('STR.NUM "3.5" -> n\n! n + 1')
+
+
+def test_str_num_invalid_number_traps_both_sides():
+    script = 'STR.NUM "pas un nombre" -> n\n! n'
+    hote, moteur = run_tw(script)
+    r = run_vm(script)
+    assert hote.sortie == vm_output_as_str(r) == []
+    assert any("INVALID_NUMBER" in e for e in hote.erreurs)
+    assert r.trapped == "INVALID_NUMBER"
+
+
 def test_deeply_nested_for_agrees():
     assert_engines_agree('% 3 -> % 3 -> !"x"')
 

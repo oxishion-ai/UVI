@@ -34,7 +34,11 @@ a = Analysis(
     pathex=[REPO],
     binaries=[],
     datas=datas,
-    hiddenimports=["numpy", "uvi_auth"],
+    # uvi_engine : le moteur du langage, extrait de uvi_core.py pour être
+    # partagé avec l'application mobile (voir mobile/README.md). uvi_core
+    # l'importe via `from uvi_engine import *` -- une forme que l'analyse
+    # statique de PyInstaller suit mal, d'où la mention explicite ici.
+    hiddenimports=["numpy", "uvi_auth", "uvi_updater", "uvi_engine"],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
