@@ -25,7 +25,13 @@ version = 9.0.0
 # standard (voir la docstring de uvi_engine.py). pygments sert uniquement à
 # la coloration syntaxique de l'éditeur, et son absence est déjà gérée
 # proprement (repli sur un TextInput simple, voir widgets/editor.py).
-requirements = python3,kivy==2.3.1,pygments,certifi
+#
+# Cette liste ne dit PAS tout : la recette Kivy de python-for-android tire
+# d'elle-même certifi, chardet, idna, requests et urllib3, qu'UVI n'utilise
+# pas et dont l'un (charset-normalizer, via requests) fait échouer le build.
+# Ils sont retirés par mobile/patch_p4a.py, qui porte l'explication
+# complète -- pas depuis ce fichier, où rien ne permet d'agir dessus.
+requirements = python3,kivy==2.3.1,pygments
 
 # --- Présentation -----------------------------------------------------------
 orientation = portrait

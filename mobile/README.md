@@ -69,16 +69,71 @@ pour ARM). Les suivants, avec le cache : ~10 min.
 
 ### B. En local, via WSL
 
-WSL est présent sur la machine mais **sans distribution installée**. À
-installer d'abord (`wsl --install -d Ubuntu`, ~500 Mo + redémarrage), puis :
+Chemin éprouvé sur cette machine (aucun droit administrateur requis :
+`wsl --update` puis `wsl --install` passent en utilisateur normal).
+
+**Prendre Ubuntu 22.04, pas la dernière version.** Ubuntu 26.04 n'embarque
+que Python 3.14, avec lequel buildozer et Cython ne fonctionnent pas ; la
+22.04 fournit Python 3.10, la configuration sur laquelle buildozer est
+réellement éprouvé.
 
 ```bash
-sudo apt install -y python3-pip openjdk-17-jdk zip unzip autoconf libtool
-pip install buildozer cython
+wsl --update
+wsl --install -d Ubuntu-22.04 --no-launch
+```
+
+Puis, dans la distribution :
+
+```bash
+sudo apt install -y git zip unzip openjdk-17-jdk python3-pip python3-dev \
+    autoconf automake libtool libtool-bin libltdl-dev pkg-config \
+    zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
+    cmake libffi-dev libssl-dev build-essential ccache
+pip install --user 'cython==0.29.36' buildozer
+```
+
+```bash
 cd mobile && python3 prepare_build.py && buildozer android debug
 ```
 
 L'APK sort dans `mobile/bin/`.
+
+#### Quatre pièges, tous rencontrés et tous résolus
+
+Ils coûtent chacun entre dix minutes et deux heures à découvrir, puisque
+c'est le temps qu'il faut au build pour y arriver.
+
+1. **`libltdl-dev` n'est pas optionnel.** libffi 3.4.2 réclame la macro
+   `LT_SYS_SYMBOL_USCORE`, apparue dans libtool 2.4.7 ; Ubuntu 22.04 livre
+   la 2.4.6, et seule `ltdl.m4` (de `libltdl-dev`) la définit. Sans lui,
+   `autoreconf` échoue sur *possibly undefined macro* après avoir déjà
+   compilé hostpython3.
+
+2. **Les licences du SDK doivent être pré-acceptées.** `sdkmanager` pose la
+   question sur l'entrée standard ; un build lancé sans terminal reçoit une
+   fin de fichier, comptée comme un refus, et `build-tools` n'est jamais
+   installé (*Aidl not found*). Écrire les fichiers d'empreinte dans
+   `$ANDROID_SDK/licenses/` règle le problème sans dialogue. Noter aussi
+   que `sdkmanager` exige `--sdk_root=` explicitement, faute de quoi il
+   échoue en affichant son aide, ce qui masque la vraie cause.
+
+3. **Supprimer le venv de build entre deux essais.** p4a rejoue
+   `hostpython -m venv venv` sur le venv existant, ce qui y réinstalle pip
+   25.3 par-dessus la 26.2.1 d'un build précédent. La 25.3 range `build_env`
+   dans un fichier, la 26.2.1 dans un dossier : l'écrasement laisse les
+   deux, et l'import casse (*cannot import name
+   `BuildDependencyInstallError`*) — tout à la fin du build. Sur un venv
+   neuf, l'ordre est sain.
+
+4. **Alléger les dépendances de la recette Kivy** avec
+   [`patch_p4a.py`](patch_p4a.py) : voir sa docstring, qui détaille pourquoi
+   `requests` fait échouer le build via `charset-normalizer` et pourquoi ni
+   un épinglage ni une recette locale n'y suffisent.
+
+Sur un Pentium N3710 (4 cœurs, 1,6 GHz, 3,8 Go de RAM visibles par WSL), le
+build complet demande environ **2 h 30**, dont l'essentiel en compilation de
+CPython et de Kivy pour ARM64. Les recompilations suivantes sont bien plus
+rapides : `~/.buildozer` et `ccache` conservent tout le travail natif.
 
 ## Compiler pour iOS
 
