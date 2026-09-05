@@ -51,3 +51,4 @@ mobile/bin/
 # qu'il diverge de l'original (voir la docstring de prepare_build.py).
 mobile/uvi_engine.py
 mobile/uvi_auth.py
+mobile/uvi_icon_512.png

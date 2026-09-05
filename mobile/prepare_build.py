@@ -33,6 +33,12 @@ RACINE = os.path.dirname(ICI)
 #: doit jamais l'être : Tkinter n'existe pas sur mobile.
 MODULES = ("uvi_engine.py", "uvi_auth.py")
 
+#: (source relative à la racine, nom dans mobile/). L'icône est copiée pour
+#: la même raison que les modules : buildozer résout icon.filename par
+#: rapport au fichier .spec, et un chemin qui remonte hors de source.dir
+#: fonctionne en local mais casse sur le runner de CI.
+FICHIERS = ((os.path.join("assets", "uvi_icon_512.png"), "uvi_icon_512.png"),)
+
 
 def copier():
     for nom in MODULES:
@@ -41,10 +47,17 @@ def copier():
             sys.exit("Introuvable : %s" % source)
         shutil.copy2(source, os.path.join(ICI, nom))
         print("copié  %s" % nom)
+    for relatif, cible in FICHIERS:
+        source = os.path.join(RACINE, relatif)
+        if not os.path.exists(source):
+            sys.exit("Introuvable : %s" % source)
+        shutil.copy2(source, os.path.join(ICI, cible))
+        print("copié  %s" % cible)
 
 
 def nettoyer():
-    for nom in MODULES:
+    noms = list(MODULES) + [cible for _s, cible in FICHIERS]
+    for nom in noms:
         cible = os.path.join(ICI, nom)
         if os.path.exists(cible):
             os.remove(cible)

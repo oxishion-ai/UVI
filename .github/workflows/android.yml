@@ -33,6 +33,14 @@ on:
       - "uvi_auth.py"
       - ".github/workflows/android.yml"
 
+# Un seul build a la fois par branche : un nouveau push annule celui qui
+# tourne encore. Sans ça, deux corrections rapprochees lanceraient deux
+# builds de 45-70 minutes en parallele, dont le premier est de toute façon
+# perime.
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apk:
     runs-on: ubuntu-latest

@@ -30,7 +30,11 @@ requirements = python3,kivy==2.3.1,pygments,certifi
 # --- Présentation -----------------------------------------------------------
 orientation = portrait
 fullscreen = 0
-icon.filename = %(source.dir)s/../assets/uvi_icon_512.png
+# Icone copiee DANS mobile/ par prepare_build.py plutot que referencee par
+# un chemin remontant d'un dossier : buildozer resout les chemins relatifs
+# au fichier .spec, et un "../" qui sort de source.dir est le genre de
+# detail qui marche en local et casse sur le runner de CI.
+icon.filename = %(source.dir)s/uvi_icon_512.png
 
 # --- Android ----------------------------------------------------------------
 # INTERNET est nécessaire à SHION.ASK et à la connexion au compte UVI
@@ -42,7 +46,12 @@ android.permissions = android.permission.INTERNET
 
 android.api = 34
 android.minapi = 24
-android.archs = arm64-v8a, armeabi-v7a
+# arm64-v8a SEULE : chaque architecture recompile CPython et toutes les
+# dependances natives, donc en ajouter une DOUBLE la duree du build (deja
+# 45-70 min a la premiere execution). arm64 couvre tous les telephones
+# vendus depuis ~2017 ; ajouter armeabi-v7a est un choix a faire au moment
+# de publier sur le Play Store, pas pour produire un APK de test.
+android.archs = arm64-v8a
 android.allow_backup = True
 
 # --- iOS --------------------------------------------------------------------
