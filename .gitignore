@@ -38,3 +38,16 @@ packaging/dist_installer/
 # machine de CHAQUE développeur, jamais versionnées -- convention standard
 # des projets Supabase.
 supabase/.temp/
+
+# --- Application mobile (voir mobile/README.md) ------------------------------
+# Environnement Python local servant à lancer l'app sur ordinateur.
+mobile/.venv/
+# Sorties de buildozer : SDK/NDK Android téléchargés et APK produits,
+# plusieurs Go, entièrement régénérables.
+mobile/.buildozer/
+mobile/bin/
+# Copies du moteur partagé déposées par prepare_build.py juste avant un
+# build : versionner un second exemplaire de uvi_engine.py garantirait
+# qu'il diverge de l'original (voir la docstring de prepare_build.py).
+mobile/uvi_engine.py
+mobile/uvi_auth.py

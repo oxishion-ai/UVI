@@ -105,7 +105,10 @@ def _rasteriser(n: int) -> "tk.PhotoImage":
 
 
 def generer_png(dossier: str) -> None:
-    for taille in (16, 24, 32, 48, 64, 128, 256):
+    # 512 ajouté pour l'application mobile : c'est la taille attendue par
+    # buildozer pour l'icône Android (mobile/buildozer.spec, icon.filename)
+    # et le minimum exigé par le Play Store pour la fiche de l'application.
+    for taille in (16, 24, 32, 48, 64, 128, 256, 512):
         img = _rasteriser(taille)
         chemin = os.path.join(dossier, f"uvi_icon_{taille}.png")
         img.write(chemin, format="png")

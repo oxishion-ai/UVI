@@ -1,0 +1,78 @@
+# Compilation de l'APK Android de UVI.
+#
+# POURQUOI EN CI ET PAS EN LOCAL : buildozer (qui pilote python-for-android,
+# le NDK et Gradle) ne fonctionne que sous Linux. La machine de développement
+# du projet est sous Windows, et WSL n'y a aucune distribution installée.
+# Plutôt que d'imposer l'installation d'un Ubuntu complet en local, la
+# compilation tourne sur un runner Linux GitHub : `git push` d'un tag, ou un
+# clic sur « Run workflow », et l'APK est téléchargeable dans les artefacts.
+#
+# Le premier build est LONG (45-70 min) : il télécharge le SDK, le NDK et
+# compile CPython pour ARM. Les suivants réutilisent le cache et tombent
+# à une dizaine de minutes.
+
+name: APK Android
+
+on:
+  # Déclenchement manuel depuis l'onglet Actions -- le mode normal pour
+  # produire un APK de test sans publier de version.
+  workflow_dispatch:
+  push:
+    # Un tag de version produit l'APK de cette version.
+    tags:
+      - "v*"
+    # Et toute modification du code mobile sur main reconstruit l'APK.
+    # Filtré par chemin plutôt que déclenché sur TOUT push : le build dure
+    # de 10 à 70 minutes, le lancer pour une correction de documentation ou
+    # un changement côté IDE bureau gaspillerait le quota d'Actions.
+    branches:
+      - main
+    paths:
+      - "mobile/**"
+      - "uvi_engine.py"
+      - "uvi_auth.py"
+      - ".github/workflows/android.yml"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Copier le moteur partagé dans mobile/
+        # uvi_engine.py et uvi_auth.py vivent à la racine (partagés avec
+        # l'IDE de bureau) alors que buildozer n'empaquette que mobile/.
+        # Voir mobile/prepare_build.py pour le détail du choix.
+        run: python mobile/prepare_build.py
+
+      - name: Mettre en cache les outils Android
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            mobile/.buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('mobile/buildozer.spec') }}
+          restore-keys: buildozer-${{ runner.os }}-
+
+      - name: Compiler l'APK
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          workdir: mobile
+          command: buildozer android debug
+          buildozer_version: stable
+
+      - name: Publier l'APK en artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvi-android-apk
+          path: mobile/bin/*.apk
+          if-no-files-found: error
